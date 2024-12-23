@@ -1,5 +1,7 @@
 # stac (Spiking Transformer Augmenting Cognition)
 
+[![DOI](https://zenodo.org/badge/907152074.svg)](https://doi.org/10.5281/zenodo.14545340)
+
 ## Overview
 
 This project explores integrating Spiking Neural Networks (SNNs) with transformer architectures for language modeling. Specifically, it implements a novel approach combining an adaptive conductance-based spiking neuron model (AdEx) with a pre-trained GPT-2 transformer. 
