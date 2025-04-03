@@ -2,7 +2,14 @@
 
 [![DOI](https://zenodo.org/badge/907152074.svg)](https://doi.org/10.5281/zenodo.14545340)
 
+<div align="center">
+  
+![STAC](https://github.com/user-attachments/assets/1ea4cc68-0cbe-40bf-805f-94b78080bf15)
+
 [Google Colab notebook](https://colab.research.google.com/drive/1BNmGuqcRaC9hnhxU7DdL9yA-lnFfnCAR?usp=sharing)
+
+</div>
+
 
 ## Overview
 
