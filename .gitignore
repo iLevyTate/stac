@@ -169,3 +169,90 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# ==========================================
+# STAC-Specific Ignores
+# ==========================================
+
+# Large model files and training outputs
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.ckpt
+*.h5
+*.pkl
+*.pickle
+
+# Test outputs and temporary model files
+test_output/
+output/
+outputs/
+checkpoints/
+models/
+snn_models/
+
+# Log files
+*.log
+conversion_pipeline.log
+snn_conversion.log
+conversion.log
+
+# Temporary and cache files
+tmp/
+temp/
+cache/
+.cache/
+
+# Experimental scripts and notebooks
+experiments/
+scratch/
+playground/
+*.ipynb
+
+# Calibration and benchmark data
+calibration_data/
+benchmark_results/
+profiling_results/
+
+# Hardware-specific files
+*.torchscript
+*.ts
+*.jit
+
+# Research paper drafts and temporary files
+*.pdf.bak
+*.docx
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+
+# IDE and editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Backup files
+*.backup
+*.bak
+
+# Data files (add exceptions in README if needed)
+data/
+datasets/
+*.csv
+*.json.bak
+*.yaml.bak
+
+# Configuration overrides
+config_local.py
+config_override.yaml
+local_settings.py
