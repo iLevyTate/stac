@@ -1,18 +1,24 @@
 # STAC: Spiking Transformer for Conversational AI
 
 [![DOI](https://zenodo.org/badge/907152074.svg)](https://doi.org/10.5281/zenodo.14545340)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
-STAC (Spiking Transformer Augmenting Cognition) converts pretrained transformer LLMs (e.g., DistilGPT-2, SmolLM2-1.7B-Instruct) into energy-efficient Spiking Neural Networks (SNNs) **while preserving coherent multi-turn conversational ability**.
+STAC (Spiking Transformer Augmenting Cognition) is a research framework with two distinct approaches:
+
+- **STAC V1**: Complete end-to-end training pipeline with learnable AdEx neurons (see `stac-v1/`)
+- **STAC V2**: Experimental conversion framework that transforms pretrained transformer LLMs (DistilGPT-2, SmolLM2-1.7B-Instruct) into Spiking Neural Networks (SNNs) for *potential* energy savings **while retaining multi-turn conversational ability in simulation**
+
+> ⚠️  **Important**: This repository currently runs *software-level* SNN simulations only. No metrics have been collected on physical neuromorphic hardware yet. Energy savings figures are theoretical projections based on spike-count analysis, not measured hardware data.
 
 ## Key Features
 
-✅ **End-to-end ANN→SNN conversion** with SpikingJelly integration  
-✅ **Multi-turn conversation support** with KV-cache and position ID handling  
-✅ **Comprehensive test suite** validating coherence, energy, and compatibility  
-✅ **Production-ready pipeline** with TorchScript export capabilities  
-✅ **Energy efficiency** targeting 3-4× reduction in power consumption  
+✔️ **Proof-of-concept ANN→SNN conversion** using SpikingJelly  
+✔️ **Multi-turn context retention** via a Temporal Spike Processor  
+✔️ **Extensive software tests** for position IDs, KV-cache, and spike-rate sanity  
+➖ **Hardware power profiling** — *planned, not implemented*  
+➖ **Full operator coverage & optimisation** — *work in progress*  
 
 ## Quick Start
 
@@ -27,11 +33,12 @@ python run_conversion.py --model_name distilgpt2 --timesteps 8 --simplified
 python snn_multi_turn_conversation_test.py --mode snn --turns 3 --timesteps 8
 
 # 4. Run comprehensive validation
-python test_conversational_snn.py --test_all --timesteps 8
+python test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps 8
 ```
 
 ## Core Components
 
+### STAC V2 (Current)
 | Component | Purpose |
 |-----------|---------|
 | `smollm2_converter.py` | Specialized converter with `TemporalSpikeProcessor` |
@@ -41,20 +48,44 @@ python test_conversational_snn.py --test_all --timesteps 8
 | `test_conversational_snn.py` | Comprehensive test suite (1K+ lines) |
 | `snn_multi_turn_conversation_test.py` | Simple conversation smoke test |
 
+### STAC V1 (Original Research)
+| Component | Purpose |
+|-----------|---------|
+| `stac-v1/stacv1.ipynb` | Complete end-to-end training pipeline with learnable AdEx neurons |
+| `stac-v1/README.md` | V1 documentation and research contributions |
+
 ## Implementation Status
 
-All **Phase 1-4** objectives are complete:
+### STAC V2 (Current)
+**Completed (prototype level)**
+- ✅ Core conversion flow (GELU→ReLU, quantization, ann2snn)
+- ✅ Temporal dynamics & KV-cache handling in PyTorch
+- ✅ Spike-count telemetry hooks and unit tests
 
-- ✅ **Core Infrastructure**: SpikingJelly integration, GELU→ReLU, quantization
-- ✅ **Temporal Dynamics**: Stateful LIF neurons, timestep calibration  
-- ✅ **Conversation Context**: Position IDs, KV-cache, attention masks
-- ✅ **Production Readiness**: TorchScript export, energy benchmarking
+**Pending / In Progress**
+- ⏳ Hardware benchmarking on Loihi-2 / Akida
+- ⏳ Expanded operator support (e.g., rotary embeddings, flash-attention variants)
+- ⏳ Integration with SCANUE multi-agent alignment layer
+- ⏳ Robust CLI/UX and documentation polish
+
+### STAC V1 (Complete)
+**Completed (research prototype)**
+- ✅ End-to-end training pipeline with learnable AdEx neurons
+- ✅ Hyperdimensional Memory Module (HEMM) integration
+- ✅ Surrogate gradient training on WikiText-2
+- ✅ L1 spike regularization for energy efficiency
+- ✅ Comprehensive validation suite
 
 ## Documentation
 
+### STAC V2 (Current)
 - 🔄 [Conversion Workflow](docs/conversion_workflow.md) - Step-by-step conversion guide
 - 📚 [API Reference](docs/api_reference.md) - Function and class documentation  
 - 🖥️ [Hardware Requirements](docs/hardware_requirements.md) - System specifications
+
+### STAC V1 (Original Research)
+- 📖 [STAC V1 Documentation](stac-v1/README.md) - End-to-end training pipeline documentation
+- 🧠 [STAC V1 Implementation](stac-v1/stacv1.ipynb) - Complete Jupyter notebook with learnable AdEx neurons
 
 ## Testing & Validation
 
@@ -62,13 +93,13 @@ The repository includes extensive testing for multi-turn conversational correctn
 
 ```bash
 # Test specific components
-python test_conversational_snn.py --test_position_boundaries
-python test_conversational_snn.py --test_attention_mask  
-python test_conversational_snn.py --test_multi_turn
-python test_conversational_snn.py --test_energy
+python test_conversational_snn.py --model_name distilgpt2 --test_position_boundaries
+python test_conversational_snn.py --model_name distilgpt2 --test_attention_mask  
+python test_conversational_snn.py --model_name distilgpt2 --test_multi_turn
+python test_conversational_snn.py --model_name distilgpt2 --test_energy
 
 # Run all tests
-python test_conversational_snn.py --test_all
+python test_conversational_snn.py --model_name distilgpt2 --test_all
 ```
 
 ## License
