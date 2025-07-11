@@ -2,6 +2,8 @@
 """
 STAC: SpikeTrain And Convert - Conversion Runner Script
 Runs the conversion pipeline for transforming an LLM into a Spiking Neural Network.
+
+NOTE: This CLI wrapper is experimental; see README for current limitations.
 """
 import argparse
 import os
@@ -46,8 +48,8 @@ if parse(current_version) < parse(min_version):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run SNN conversion pipeline')
-    parser.add_argument('--model_name', type=str, default='TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-                      help='Pretrained model to convert (default is TinyLlama which is small enough to run quickly)')
+    parser.add_argument('--model_name', type=str, default='distilgpt2',
+                      help='Pretrained model to convert (default is distilgpt2 for fast testing). Supported: distilgpt2, SmolLM2-1.7B-Instruct')
     parser.add_argument('--output_dir', type=str, default='./snn_converted_model',
                       help='Directory to save the converted model')
     parser.add_argument('--timesteps', type=int, default=16,
@@ -76,7 +78,7 @@ def parse_args():
 def run_component_tests():
     """Run basic functionality tests to ensure all components work."""
     logger.info("=== Running Component Tests ===")
-    cmd = ["python", "test_snn_components.py", "--test_all"]
+    cmd = ["python", "test_conversational_snn.py", "--test_all"]
     
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True)

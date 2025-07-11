@@ -7,6 +7,13 @@ Licensed under the MIT License. See LICENSE file for details.
 
 SmolLM2 Converter: Convert SmolLM2-1.7B-Instruct to a Spiking Neural Network
 Specialized script for creating a conversational spiking language model.
+
+# NOTE: -------------------------------------------------------------------
+# This specialized SmolLM2 conversion pipeline is a **work in progress**.
+# While the TemporalSpikeProcessor enables multi-turn state retention in
+# software, true hardware-level validation (e.g., Intel Loihi-2) is still
+# pending.  Expect API changes and incomplete operator coverage.
+# ---------------------------------------------------------------------------
 """
 import argparse
 import torch

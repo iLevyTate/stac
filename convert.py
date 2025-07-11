@@ -11,10 +11,13 @@ import argparse
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import json
-import spikingjelly
+import spikingjelly  # type: ignore
 from packaging.version import parse
 import importlib.metadata
 import logging
+from typing import Dict, Any, List, Tuple, Optional, Union
+import os
+from tqdm import tqdm
 
 # Configure logging
 logging.basicConfig(
@@ -27,18 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("generic_converter")
 
-# Direct SpikingJelly imports
-from spikingjelly_compat import get_quantizer
-Quantizer = get_quantizer()
-from spikingjelly.activation_based.conversion import Converter
-from spikingjelly.activation_based.layer import LayerNorm as SpikeLN
-# Assuming SpikeAttention is from 'layer'. If it's 'ann2snn' in SJ 0.0.0.14, this might need adjustment.
-from spikingjelly.activation_based.layer import SpikeAttention
-from spikingjelly.activation_based import surrogate
-
-import os
-from tqdm import tqdm
-
+# Check SpikingJelly version
 min_version = '0.0.0.0.14'
 current_version = importlib.metadata.version('spikingjelly')
 if parse(current_version) < parse(min_version):
@@ -47,11 +39,48 @@ if parse(current_version) < parse(min_version):
         f'Please upgrade SpikingJelly: pip install "spikingjelly[cuda]>=0.0.0.0.14" --pre'
     )
 
-def parse_args():
+# Direct SpikingJelly imports
+from spikingjelly_compat import get_quantizer
+Quantizer = get_quantizer()
+
+# Import SpikingJelly components with error handling
+try:
+    from spikingjelly.activation_based.ann2snn import Converter  # type: ignore
+except ImportError:
+    logger.warning("Could not import Converter from spikingjelly.activation_based.ann2snn")
+    Converter = None
+
+try:
+    from spikingjelly.activation_based.layer import LayerNorm as SpikeLN  # type: ignore
+except ImportError:
+    logger.warning("Could not import LayerNorm from spikingjelly.activation_based.layer")
+    SpikeLN = None
+
+try:
+    from spikingjelly.activation_based.layer import SpikeAttention  # type: ignore
+except ImportError:
+    logger.warning("Could not import SpikeAttention from spikingjelly.activation_based.layer")
+    SpikeAttention = None
+
+try:
+    from spikingjelly.activation_based import surrogate  # type: ignore
+except ImportError:
+    logger.warning("Could not import surrogate from spikingjelly.activation_based")
+    surrogate = None
+
+# NOTE: -------------------------------------------------------------------
+# This conversion script is **experimental** and provided as a research
+# prototype only.  It has been validated in software simulation but has not
+# yet been profiled on real neuromorphic hardware.  Energy-saving figures in
+# the README and paper are projections based on spike-count telemetry, not
+# measured watt-hour data.  Use at your own risk.
+# ---------------------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Convert LLM to SNN')
-    parser.add_argument('--model_name', type=str, default='gpt2-medium', 
-                        help='The model to convert (default: gpt2-medium)')
+    parser.add_argument('--model_name', type=str, default='distilgpt2', 
+                        help='The model to convert (default: distilgpt2). Supported: distilgpt2, SmolLM2-1.7B-Instruct')
     parser.add_argument('--output_dir', type=str, default='./snn_model',
                         help='Directory to save the converted model')
     parser.add_argument('--num_samples', type=int, default=10,
@@ -68,7 +97,7 @@ def parse_args():
                         help='Use simplified conversion approach without relying on complex SpikingJelly features')
     return parser.parse_args()
 
-def create_calibration_data(tokenizer, num_samples=10, max_length=128):
+def create_calibration_data(tokenizer: AutoTokenizer, num_samples: int = 10, max_length: int = 128) -> Dict[str, torch.Tensor]:
     """Create simple calibration data for SNN conversion."""
     logger.info(f"Creating {num_samples} calibration samples...")
     prompts = [
@@ -104,7 +133,7 @@ def create_calibration_data(tokenizer, num_samples=10, max_length=128):
     
     return inputs
 
-def convert_model_to_spiking(model, calibration_data, timesteps=64, device='cpu'):
+def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str, torch.Tensor], timesteps: int = 64, device: str = 'cpu') -> torch.nn.Module:
     """Convert model to SNN using SpikeZIP-TF method."""
     logger.info("Running SpikeZIP-TF conversion...")
     
@@ -117,12 +146,15 @@ def convert_model_to_spiking(model, calibration_data, timesteps=64, device='cpu'
 
     # Step 2: Insert quantizers for 8-bit precision
     logger.info("Inserting 8-bit quantizers...")
-    quantizer = Quantizer(n_bits_w=8, n_bits_a=8)
-    model = quantizer(model)
+    if Quantizer is not None:
+        quantizer = Quantizer(n_bits_w=8, n_bits_a=8)
+        model = quantizer(model)
+    else:
+        logger.warning("Quantizer not available, skipping quantization step")
     
     # Step 3: Prepare calibration dataloader format
     logger.info("Preparing calibration data...")
-    calib_data_list = []
+    calib_data_list: List[Tuple[Dict[str, torch.Tensor], None]] = []
     
     # Create a simple dataloader-like structure (data, target)
     # Since our calibration data only needs input_ids and attention_mask
@@ -135,19 +167,15 @@ def convert_model_to_spiking(model, calibration_data, timesteps=64, device='cpu'
             calib_data_list.append((sample, None))
     
     # Check if Converter is available
+    if Converter is None:
+        logger.error("Converter not available, falling back to simplified conversion")
+        return simplified_conversion(model, timesteps)
+    
     try:
         # Step 4: SpikeZIP-TF conversion
         logger.info(f"Converting to SNN with {timesteps} timesteps...")
         
-        # Import converter here to ensure it's defined
-        try:
-            from spikingjelly.activation_based.ann2snn import Converter as SpikeConverter
-        except ImportError:
-            logger.error("Error: Converter not found in spikingjelly.activation_based.ann2snn")
-            logger.info("Falling back to simplified conversion")
-            return simplified_conversion(model, timesteps)
-            
-        snn_converter = SpikeConverter(
+        snn_converter = Converter(
             mode="max",
             dataloader=calib_data_list,
             T=timesteps,
@@ -160,36 +188,38 @@ def convert_model_to_spiking(model, calibration_data, timesteps=64, device='cpu'
             snn_model = snn_converter(model)
             
             # Step 5: Replace non-spiking operations with spike-compatible versions
-            logger.info("Replacing LayerNorm with spike-compatible version...")
-            for name, module in snn_model.named_modules():
-                if isinstance(module, torch.nn.LayerNorm):
-                    parent_name = ".".join(name.split(".")[:-1])
-                    child_name = name.split(".")[-1]
-                    
-                    if parent_name:
-                        parent = snn_model.get_submodule(parent_name)
-                        setattr(parent, child_name, SpikeLN(module.normalized_shape))
-                    else:
-                        setattr(snn_model, child_name, SpikeLN(module.normalized_shape))
+            if SpikeLN is not None:
+                logger.info("Replacing LayerNorm with spike-compatible version...")
+                for name, module in snn_model.named_modules():
+                    if isinstance(module, torch.nn.LayerNorm):
+                        parent_name = ".".join(name.split(".")[:-1])
+                        child_name = name.split(".")[-1]
+                        
+                        if parent_name:
+                            parent = snn_model.get_submodule(parent_name)
+                            setattr(parent, child_name, SpikeLN(module.normalized_shape))
+                        else:
+                            setattr(snn_model, child_name, SpikeLN(module.normalized_shape))
             
             # Step 6: Replace self-attention with spike-compatible version
             # Note: This is model-dependent, so we need to adapt to the model architecture
-            logger.info("Checking model for attention blocks to convert...")
-            if hasattr(snn_model, 'transformer') and hasattr(snn_model.transformer, 'h'):
-                logger.info("Converting attention blocks to SpikeAttention...")
-                for block in snn_model.transformer.h:
-                    if hasattr(block, 'attn'):
-                        # GPT-2 style architecture
-                        hidden_size = snn_model.config.hidden_size
-                        num_heads = snn_model.config.num_attention_heads
-                        
-                        block.attn = SpikeAttention(
-                            embed_dim=hidden_size,
-                            num_heads=num_heads,
-                            T=timesteps,
-                            causal=True  # Enforce autoregressive masking
-                        )
-                        logger.info(f"Replaced attention with SpikeAttention ({num_heads} heads)")
+            if SpikeAttention is not None:
+                logger.info("Checking model for attention blocks to convert...")
+                if hasattr(snn_model, 'transformer') and hasattr(snn_model.transformer, 'h'):
+                    logger.info("Converting attention blocks to SpikeAttention...")
+                    for block in snn_model.transformer.h:
+                        if hasattr(block, 'attn') and hasattr(snn_model, 'config'):
+                            # GPT-2 style architecture
+                            hidden_size = snn_model.config.hidden_size
+                            num_heads = snn_model.config.num_attention_heads
+                            
+                            block.attn = SpikeAttention(
+                                embed_dim=hidden_size,
+                                num_heads=num_heads,
+                                T=timesteps,
+                                causal=True  # Enforce autoregressive masking
+                            )
+                            logger.info(f"Replaced attention with SpikeAttention ({num_heads} heads)")
 
             logger.info("SNN conversion complete!")
             return snn_model
@@ -204,7 +234,7 @@ def convert_model_to_spiking(model, calibration_data, timesteps=64, device='cpu'
         logger.info("Falling back to simplified conversion...")
         return simplified_conversion(model, timesteps)
 
-def simplified_conversion(model, timesteps=64):
+def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.nn.Module:
     """
     Perform a simplified conversion to SNN without relying on advanced SpikingJelly features.
     This is a fallback when full conversion can't be performed due to compatibility issues.
@@ -219,7 +249,7 @@ def simplified_conversion(model, timesteps=64):
             logger.info("Replaced GELU with ReLU")
     
     # 2. Add SNN-specific attributes
-    model.T = timesteps  # Store timesteps in the model
+    setattr(model, 'T', timesteps)  # Store timesteps in the model
     
     # 3. Implement exact threshold matching for SpikeZIP-TF equivalence
     logger.info("Implementing exact threshold matching...")
@@ -254,7 +284,7 @@ def simplified_conversion(model, timesteps=64):
         def snn_forward(self, *args, **kwargs):
             """Wrapped forward method to simulate SNN behavior."""
             # Extract the timesteps parameter if provided
-            T = kwargs.pop('T', self.T) if hasattr(self, 'T') else timesteps
+            T = kwargs.pop('T', getattr(self, 'T', timesteps))
             
             # Call the original forward method
             outputs = self._original_forward(*args, **kwargs)
@@ -267,12 +297,13 @@ def simplified_conversion(model, timesteps=64):
             return outputs
         
         # Apply the wrapped forward method
-        model.forward = snn_forward.__get__(model)
+        import types
+        model.forward = types.MethodType(snn_forward, model)
     
     logger.info("Applied simplified SNN conversion")
     return model
 
-def save_snn_model(model, path):
+def save_snn_model(model: torch.nn.Module, path: str) -> bool:
     """
     Save the SNN model in a way that's easier to load later.
     Instead of saving the entire model object, we save the state_dict and metadata separately.
@@ -282,9 +313,9 @@ def save_snn_model(model, path):
     # Create a dictionary with metadata and state dict
     snn_data = {
         "state_dict": model.state_dict(),
-        "config": model.config if hasattr(model, 'config') else None,
+        "config": getattr(model, 'config', None),
         "model_type": type(model).__name__,
-        "T": model.T if hasattr(model, 'T') else 16,
+        "T": getattr(model, 'T', 16),
         "simplified": True
     }
     
@@ -294,7 +325,7 @@ def save_snn_model(model, path):
     logger.info(f"Saved model state and metadata to {path}")
     return True
 
-def main():
+def main() -> int:
     """Main conversion pipeline."""
     args = parse_args()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -388,4 +419,4 @@ def main():
         return 1
 
 if __name__ == "__main__":
-    main() 
+    exit(main()) 
