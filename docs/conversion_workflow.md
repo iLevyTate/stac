@@ -1,140 +1,161 @@
-# STAC: Conversion Workflow
-
-This document describes the complete workflow for converting pretrained transformer LLMs to Spiking Neural Networks (SNNs) with multi-turn conversational capabilities.
+# Conversion Workflow
 
 ## Overview
 
-STAC converts transformer models (DistilGPT-2, SmolLM2-1.7B-Instruct) to energy-efficient spiking neural networks while preserving coherent dialog across conversation turns. All implementation phases are **complete** and validated.
+The STAC framework provides two main conversion approaches:
+1. **Simplified Conversion**: Fast, basic ANN→SNN transformation
+2. **Full Pipeline**: Comprehensive conversion with quantization and calibration
 
-## Conversion Pipeline Architecture
+## Conversion Process
 
+### Step 1: Model Loading
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Load pretrained model
+model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
 ```
-Input Model (HuggingFace) → SpikingJelly Conversion → TemporalSpikeProcessor → Multi-Turn SNN
+
+### Step 2: Architecture Conversion
+The conversion process involves three main transformations:
+
+1. **Activation Replacement**: GELU → ReLU
+2. **Normalization Replacement**: LayerNorm → SpikeLayerNorm  
+3. **Attention Replacement**: Standard Attention → SpikeAttention
+
+### Step 3: Temporal Wrapper
+```python
+from smollm2_converter import TemporalSpikeProcessor
+
+# Wrap with multi-turn capability
+snn_model = TemporalSpikeProcessor(converted_model, T=16)
 ```
 
-## Implementation Status: ✅ COMPLETE
+## Conversion Modes
 
-### ✅ Phase 1: Core Infrastructure
-
-**Status: COMPLETE**
-
-1. **SpikingJelly Integration**
-   - ✅ Cross-version compatibility layer (`spikingjelly_compat.py`)
-   - ✅ Unified Quantizer/Converter imports
-   - ✅ Stable conversion pipeline with fallbacks
-
-2. **Base Conversion**
-   - ✅ GELU→ReLU activation replacement
-   - ✅ `simplified_conversion()` for fast testing
-   - ✅ Full SpikingJelly integration with calibration
-
-### ✅ Phase 2: Temporal Dynamics
-
-**Status: COMPLETE**
-
-1. **Neuron State Management**
-   - ✅ Stateful LIF neurons with `functional.reset_net()`
-   - ✅ Membrane potential reset between tokens
-   - ✅ `TemporalSpikeProcessor` wrapper
-
-2. **Timestep Calibration**
-   - ✅ Configurable timesteps (T=8-64)
-   - ✅ Threshold scaling with `calibrate_timesteps()`
-   - ✅ Logit magnitude restoration
-
-### ✅ Phase 3: Conversation Context
-
-**Status: COMPLETE**
-
-1. **Position ID Management**
-   - ✅ HuggingFace-compatible position ID generation
-   - ✅ Clamping to `max_position_embeddings`
-   - ✅ Continuous tracking across conversation turns
-
-2. **KV Cache Implementation**
-   - ✅ Global and per-conversation cache support
-   - ✅ Automatic cache growth and truncation
-   - ✅ Batch-aware cache management
-
-3. **Attention Mechanism**
-   - ✅ Dynamic attention mask growth
-   - ✅ Causal masking for autoregressive generation
-   - ✅ Context length management
-
-### ✅ Phase 4: Testing and Optimization
-
-**Status: COMPLETE**
-
-1. **Multi-turn Testing**
-   - ✅ Comprehensive test suite (`test_conversational_snn.py`)
-   - ✅ Factual recall validation with keyword matching
-   - ✅ Position ID boundary testing
-   - ✅ Attention mask continuity validation
-
-2. **Energy Benchmarking**
-   - ✅ Spike counting and energy estimation
-   - ✅ Wall-clock timing measurements
-   - ✅ Mixed-precision compatibility testing
-
-## Quick Start Commands
-
-### 1. Fast Conversion (Recommended for Testing)
+### Simplified Mode
+**Purpose**: Fast testing and development  
+**Time**: 2-15 minutes  
+**Features**:
+- Basic layer replacement
+- No quantization
+- Minimal calibration
 
 ```bash
-# Convert DistilGPT-2 with simplified pipeline
-python run_conversion.py --model_name distilgpt2 --timesteps 8 --simplified
-
-# Test the converted model
-python snn_multi_turn_conversation_test.py --mode snn --turns 3 --timesteps 8
+python run_conversion.py --model_name distilgpt2 --simplified --timesteps 8
 ```
 
-### 2. Full SpikingJelly Conversion
+### Full Pipeline Mode
+**Purpose**: Production-ready conversion  
+**Time**: 1-3 hours  
+**Features**:
+- 8-bit quantization
+- Extensive calibration
+- Threshold optimization
 
 ```bash
-# Convert with full calibration (requires more memory)
-python run_conversion.py --model_name distilgpt2 --timesteps 16 --num_samples 10
-
-# Convert SmolLM2 (requires ~20GB VRAM)
-python smollm2_converter.py --model_name HuggingFaceTB/SmolLM2-1.7B-Instruct --timesteps 32
+python run_conversion.py --model_name SmolLM2-1.7B-Instruct --timesteps 16
 ```
 
-### 3. Comprehensive Testing
+## Supported Models
 
+### Currently Supported
+- **DistilGPT-2**: Lightweight GPT-2 variant
+- **SmolLM2-1.7B-Instruct**: Instruction-tuned language model
+
+### Model Requirements
+- Must be causal language models
+- Transformer architecture
+- HuggingFace compatible
+
+## Conversion Parameters
+
+### Key Parameters
+- `--timesteps`: Number of SNN timesteps (8-64)
+- `--simplified`: Use simplified conversion
+- `--model_name`: Source model identifier
+- `--output_dir`: Output directory
+
+### Advanced Parameters
+- `--surrogate_function`: Surrogate gradient function
+- `--use_sparse`: Enable sparse tensor optimization
+- `--verify`: Run post-conversion verification
+
+## Multi-Turn Capability
+
+### TemporalSpikeProcessor Features
+- **KV Cache Management**: Maintains context across turns
+- **Position ID Handling**: Manages sequence positions
+- **Batch Processing**: Supports multiple conversations
+
+### Usage Example
+```python
+processor = TemporalSpikeProcessor(snn_model, T=16, max_context_length=512)
+
+# Multi-turn conversation
+for turn in conversation_turns:
+    output = processor(input_ids, use_cache=True)
+    # Process output...
+```
+
+## Validation and Testing
+
+### Automatic Validation
+The conversion process includes built-in validation:
+- Position ID boundary testing
+- Attention mask continuity
+- Multi-turn coherence verification
+- Spike rate analysis
+
+### Manual Testing
 ```bash
-# Run all validation tests
-python test_conversational_snn.py --test_all --timesteps 8
+# Run comprehensive tests
+python test_conversational_snn.py --test_all --timesteps 16
 
 # Test specific components
-python test_conversational_snn.py --test_position_boundaries
-python test_conversational_snn.py --test_attention_mask
 python test_conversational_snn.py --test_multi_turn
-python test_conversational_snn.py --test_energy
 ```
 
-## Key Components
+## Output Format
 
-| File | Purpose |
-|------|---------|
-| `run_conversion.py` | Main CLI entry point for conversions |
-| `smollm2_converter.py` | Specialized converter with `TemporalSpikeProcessor` |
-| `convert.py` | Generic conversion utilities |
-| `spikingjelly_compat.py` | Cross-version compatibility layer |
+### Saved Model Structure
+```
+output_dir/
+├── snn_model.pt          # Converted SNN model
+├── tokenizer/            # Tokenizer files
+├── config.json           # Model configuration
+└── conversion_log.txt    # Conversion details
+```
 
-## Validation Checklist
-
-Before deploying a converted model, ensure all tests pass:
-
-- ✅ Position IDs stay within bounds
-- ✅ Attention masks grow correctly across turns  
-- ✅ KV cache maintains conversation history
-- ✅ Multi-turn coherence with factual recall
-- ✅ Energy consumption within expected range
-- ✅ TorchScript export compatibility
+### Model Metadata
+The saved model includes:
+- Original model information
+- Conversion parameters
+- Timestep configuration
+- Simplified/full mode flag
 
 ## Troubleshooting
 
-**Memory Issues**: Use `--simplified` flag or reduce `--timesteps`  
-**Conversion Failures**: Check SpikingJelly version compatibility  
-**Generation Quality**: Adjust temperature and top-k in generation scripts  
+### Common Issues
+1. **Memory Errors**: Reduce batch size or use CPU
+2. **Conversion Failures**: Try simplified mode first
+3. **Import Errors**: Verify SpikingJelly version >= 0.0.0.0.14
 
-For detailed implementation status, see [Project State Overview](PROJECT_STATE_OVERVIEW.md). 
+### Performance Tips
+1. Start with simplified mode for testing
+2. Use smaller timesteps (8-16) for faster conversion
+3. Ensure adequate GPU memory for large models
+
+## Future Enhancements
+
+### Planned Features
+- Additional model architectures
+- Hardware-specific optimizations
+- Automated hyperparameter tuning
+- Real-time conversion monitoring
+
+### Research Directions
+- Improved spike encoding methods
+- Advanced calibration techniques
+- Multi-modal SNN support 

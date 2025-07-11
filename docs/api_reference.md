@@ -1,228 +1,340 @@
-# STAC API Reference
+# API Reference
 
-This document provides reference documentation for the key components of the STAC multi-turn conversational SNN pipeline.
-
-## Core Components
+## Core Classes
 
 ### TemporalSpikeProcessor
 
-The central component for processing SNN models with multi-turn conversational capabilities.
-
-**Location**: `smollm2_converter.py`
+Main class for multi-turn conversational SNN processing.
 
 ```python
-from smollm2_converter import TemporalSpikeProcessor
-
-processor = TemporalSpikeProcessor(
-    snn_model,               # The converted SNN model
-    T=16,                    # Number of timesteps
-    max_context_length=512   # Maximum context length
-)
+class TemporalSpikeProcessor(nn.Module):
+    def __init__(self, snn_model, T=16, max_context_length=512):
+        """
+        Initialize the temporal spike processor.
+        
+        Args:
+            snn_model: The converted SNN model
+            T: Number of timesteps for spike processing
+            max_context_length: Maximum sequence length
+        """
 ```
 
-#### Key Methods
+#### Methods
 
-**`forward(input_ids, attention_mask=None, use_cache=True, batch_ids=None)`**
-- Process inputs through the SNN with KV-cache support
-- Returns: `_CompatOutput` object with `.logits` and `.past_key_values`
+##### `forward(input_ids, attention_mask=None, use_cache=True, **kwargs)`
+Process input through the SNN with temporal dynamics.
 
-**`reset_cache(batch_id=None)`**
-- Reset KV cache for specific batch or all batches
-- Args: `batch_id` (optional) - specific conversation to reset
+**Parameters:**
+- `input_ids` (torch.Tensor): Input token IDs
+- `attention_mask` (torch.Tensor, optional): Attention mask
+- `use_cache` (bool): Whether to use KV cache for multi-turn
+- `**kwargs`: Additional model arguments
 
-**`get_position_ids()`**
-- Return current position IDs tensor for validation
-- Returns: `torch.Tensor` of position IDs
+**Returns:**
+- Model output with logits and optional past key values
 
-**`_create_position_ids(input_shape, past_length=0)`**
-- Internal method for HuggingFace-compatible position ID creation
-- Handles clamping to `max_position_embeddings`
+##### `reset_cache(batch_id=None)`
+Reset the KV cache for new conversations.
 
-### Spike-Compatible Layers
+**Parameters:**
+- `batch_id` (int, optional): Specific batch to reset
 
-#### SpikeLayerNorm
+##### `get_position_ids()`
+Get current position IDs for the conversation.
 
-Spiking-compatible layer normalization replacement.
+**Returns:**
+- Dictionary with position ID information
+
+### SpikeAttention
+
+Spiking-compatible attention mechanism.
 
 ```python
-from smollm2_converter import SpikeLayerNorm
-
-layer_norm = SpikeLayerNorm(
-    normalized_shape,    # Shape to normalize over
-    eps=1e-5            # Epsilon for numerical stability
-)
+class SpikeAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, T=16, causal=True):
+        """
+        Initialize spike-based attention.
+        
+        Args:
+            embed_dim: Embedding dimension
+            num_heads: Number of attention heads
+            T: Number of timesteps
+            causal: Whether to use causal attention
+        """
 ```
 
-#### SpikeAttention
+### SpikeLayerNorm
 
-Spiking-compatible self-attention implementation.
-
-```python
-from smollm2_converter import SpikeAttention
-
-attention = SpikeAttention(
-    embed_dim=768,       # Embedding dimension
-    num_heads=12,        # Number of attention heads
-    T=16,               # Timesteps for spike processing
-    causal=True         # Enable causal masking
-)
-```
-
-#### SpikeSoftmax
-
-Spiking-compatible softmax using spike rates.
+Spiking-compatible layer normalization.
 
 ```python
-from smollm2_converter import SpikeSoftmax
-
-softmax = SpikeSoftmax(
-    T=16,               # Temporal windows
-    dim=-1              # Dimension to apply softmax
-)
+class SpikeLayerNorm(nn.Module):
+    def __init__(self, normalized_shape, eps=1e-5):
+        """
+        Initialize spike-compatible layer normalization.
+        
+        Args:
+            normalized_shape: Input shape to normalize
+            eps: Small constant for numerical stability
+        """
 ```
 
 ## Conversion Functions
 
-### simplified_conversion(model, timesteps=32)
+### `replace_gelu_with_relu(model)`
 
-Fast conversion method for testing and development.
+Replace GELU activations with ReLU for SNN compatibility.
 
-**Location**: `smollm2_converter.py`
+**Parameters:**
+- `model` (torch.nn.Module): Model to modify
 
-```python
-from smollm2_converter import simplified_conversion
+**Returns:**
+- Modified model with ReLU activations
 
-snn_model = simplified_conversion(model, timesteps=16)
-```
+### `simplified_conversion(model, timesteps=32)`
 
-**Features**:
-- GELU→ReLU replacement
-- Threshold scaling for SpikeZIP-TF equivalence
-- Wrapped forward method for SNN behavior simulation
+Perform simplified ANN→SNN conversion.
 
-### Full SpikingJelly Conversion
+**Parameters:**
+- `model` (torch.nn.Module): Source model
+- `timesteps` (int): Number of SNN timesteps
 
-Complete conversion using SpikingJelly's Converter with calibration.
+**Returns:**
+- Converted SNN model
 
-**Location**: `convert.py`, `smollm2_converter.py`
+### `replace_layernorm_with_spikelayernorm(model)`
 
-```python
-from convert import convert_model_to_spiking
+Replace LayerNorm with SpikeLayerNorm.
 
-snn_model = convert_model_to_spiking(
-    model, 
-    calibration_data, 
-    timesteps=64,
-    device='cuda'
-)
-```
+**Parameters:**
+- `model` (torch.nn.Module): Model to modify
 
-## Compatibility Layer
+**Returns:**
+- Modified model with spike-compatible normalization
 
-### spikingjelly_compat.py
+### `replace_attention_with_spikeattention(model)`
 
-Cross-version compatibility for SpikingJelly components.
+Replace standard attention with SpikeAttention.
 
-```python
-from spikingjelly_compat import get_quantizer, get_converter, get_neuron
+**Parameters:**
+- `model` (torch.nn.Module): Model to modify
 
-Quantizer = get_quantizer()      # Get version-appropriate Quantizer
-Converter = get_converter()      # Get version-appropriate Converter  
-LIFNode = get_neuron()          # Get LIF neuron implementation
-```
+**Returns:**
+- Modified model with spike-compatible attention
 
-## Testing Framework
+### `apply_surrogate_gradients(model, alpha=4.0)`
 
-### test_conversational_snn.py
+Apply surrogate gradient functions for SNN training.
 
-Comprehensive test suite for multi-turn validation.
+**Parameters:**
+- `model` (torch.nn.Module): SNN model
+- `alpha` (float): Surrogate gradient scaling factor
 
-**Key Test Functions**:
+**Returns:**
+- Model with surrogate gradients
 
-```python
-# Test position ID boundaries
-python test_conversational_snn.py --test_position_boundaries
+### `calibrate_timesteps(model, original_T, target_T)`
 
-# Test attention mask continuity  
-python test_conversational_snn.py --test_attention_mask
+Calibrate spike timing for different timestep counts.
 
-# Test multi-turn coherence
-python test_conversational_snn.py --test_multi_turn
+**Parameters:**
+- `model` (torch.nn.Module): SNN model
+- `original_T` (int): Original timestep count
+- `target_T` (int): Target timestep count
 
-# Test energy consumption
-python test_conversational_snn.py --test_energy
+**Returns:**
+- Calibrated model
 
-# Run all tests
-python test_conversational_snn.py --test_all
-```
+### `save_snn_model(model, tokenizer, path)`
 
-### snn_multi_turn_conversation_test.py
+Save the converted SNN model with metadata.
 
-Simple conversation smoke test.
+**Parameters:**
+- `model` (torch.nn.Module): SNN model to save
+- `tokenizer`: Associated tokenizer
+- `path` (str): Save path
 
-```python
-from snn_multi_turn_conversation_test import run_multi_turn_chat
+**Returns:**
+- Success status
 
-conversation = run_multi_turn_chat(
-    turns=3,
-    timesteps=8,
-    device_str="cuda",
-    temperature=1.0,
-    top_k=20,
-    mode="snn"  # or "baseline"
-)
-```
+## Utility Functions
 
-## CLI Entry Points
+### `create_calibration_data(tokenizer, num_samples=10, max_length=128)`
 
-### run_conversion.py
+Create calibration data for SNN conversion.
 
-Main conversion script with comprehensive options.
+**Parameters:**
+- `tokenizer`: HuggingFace tokenizer
+- `num_samples` (int): Number of calibration samples
+- `max_length` (int): Maximum sequence length
 
+**Returns:**
+- Dictionary with calibration data
+
+## Testing Functions
+
+### `test_position_id_boundaries(model, tokenizer, args)`
+
+Test position ID handling at sequence boundaries.
+
+**Parameters:**
+- `model`: SNN model to test
+- `tokenizer`: Associated tokenizer
+- `args`: Test configuration
+
+**Returns:**
+- Test results
+
+### `test_attention_mask_continuity(model, tokenizer, args)`
+
+Test attention mask continuity across conversation turns.
+
+**Parameters:**
+- `model`: SNN model to test
+- `tokenizer`: Associated tokenizer
+- `args`: Test configuration
+
+**Returns:**
+- Test results
+
+### `test_multi_turn_coherence(model, tokenizer, args)`
+
+Test multi-turn conversation coherence.
+
+**Parameters:**
+- `model`: SNN model to test
+- `tokenizer`: Associated tokenizer
+- `args`: Test configuration
+
+**Returns:**
+- Test results
+
+### `simulate_conversation(model, tokenizer, turns=3, device="cpu")`
+
+Simulate a multi-turn conversation for testing.
+
+**Parameters:**
+- `model`: SNN model
+- `tokenizer`: Associated tokenizer
+- `turns` (int): Number of conversation turns
+- `device` (str): Computing device
+
+**Returns:**
+- Conversation results
+
+## Command Line Interface
+
+### `run_conversion.py`
+
+Main CLI tool for model conversion.
+
+**Usage:**
 ```bash
-python run_conversion.py \
-    --model_name distilgpt2 \
-    --timesteps 16 \
-    --simplified \
-    --output_dir ./snn_model
+python run_conversion.py [OPTIONS]
 ```
 
-### smollm2_converter.py
+**Options:**
+- `--model_name`: Model to convert (distilgpt2, SmolLM2-1.7B-Instruct)
+- `--output_dir`: Output directory
+- `--timesteps`: Number of SNN timesteps
+- `--simplified`: Use simplified conversion
+- `--verify`: Run post-conversion verification
 
-Specialized converter for SmolLM2 models.
+### `test_conversational_snn.py`
 
+Testing and validation tool.
+
+**Usage:**
 ```bash
-python smollm2_converter.py \
-    --model_name HuggingFaceTB/SmolLM2-1.7B-Instruct \
-    --timesteps 32 \
-    --max_context_length 2048
+python test_conversational_snn.py [OPTIONS]
 ```
 
-## Output Formats
+**Options:**
+- `--test_all`: Run all tests
+- `--test_position_boundaries`: Test position ID boundaries
+- `--test_attention_mask`: Test attention mask continuity
+- `--test_multi_turn`: Test multi-turn capabilities
+- `--test_energy`: Test energy consumption
 
-### _CompatOutput
+## Configuration
 
-Custom output object that supports both HuggingFace and tensor-style access.
+### Model Parameters
 
-```python
-outputs = model(input_ids)
+**Supported Models:**
+- `distilgpt2`: DistilGPT-2 (117M parameters)
+- `SmolLM2-1.7B-Instruct`: SmolLM2 1.7B Instruct (1.7B parameters)
 
-# HuggingFace style
-logits = outputs.logits
-past_kv = outputs.past_key_values
+**Conversion Parameters:**
+- `timesteps`: 8-64 (recommended: 16)
+- `max_context_length`: 512-2048 (recommended: 512)
+- `surrogate_function`: atan, sigmoid, stbif_plus
 
-# Tensor style  
-logits = outputs[0]
-next_token_logits = outputs[0, -1, :]
-```
+### Hardware Configuration
+
+**GPU Memory Requirements:**
+- DistilGPT-2: 4-8 GB
+- SmolLM2-1.7B-Instruct: 20 GB
+
+**CPU Requirements:**
+- Multi-core processor recommended
+- 16-32 GB RAM
 
 ## Error Handling
 
-Common issues and solutions:
+### Common Exceptions
 
-**Memory Issues**: Use `--simplified` flag or reduce `--timesteps`
-**SpikingJelly Compatibility**: Check version with `spikingjelly_compat.py`
-**Position ID Overflow**: Automatic clamping in `TemporalSpikeProcessor`
-**KV Cache Growth**: Automatic truncation at `max_context_length`
+**ImportError**: SpikingJelly version compatibility
+```python
+# Ensure SpikingJelly >= 0.0.0.0.14
+pip install spikingjelly[cuda] -U --pre
+```
 
-For implementation details, see [Project State Overview](PROJECT_STATE_OVERVIEW.md). 
+**CUDA Out of Memory**: Insufficient GPU memory
+```python
+# Reduce batch size or use CPU
+device = 'cpu'
+```
+
+**Position ID Errors**: Sequence length exceeds model limits
+```python
+# Reduce max_context_length
+max_context_length = 512
+```
+
+## Examples
+
+### Basic Conversion
+```python
+from smollm2_converter import *
+
+# Load model
+model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+
+# Convert to SNN
+snn_model = simplified_conversion(model, timesteps=16)
+
+# Wrap with temporal processor
+processor = TemporalSpikeProcessor(snn_model, T=16)
+
+# Test conversation
+result = simulate_conversation(processor, tokenizer, turns=3)
+```
+
+### Advanced Usage
+```python
+# Full pipeline conversion
+from convert import convert_model_to_spiking, create_calibration_data
+
+# Create calibration data
+calib_data = create_calibration_data(tokenizer, num_samples=10)
+
+# Convert with calibration
+snn_model = convert_model_to_spiking(model, calib_data, timesteps=32)
+
+# Apply surrogate gradients
+snn_model = apply_surrogate_gradients(snn_model, alpha=4.0)
+
+# Save model
+save_snn_model(snn_model, tokenizer, "./my_snn_model")
+``` 
