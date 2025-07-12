@@ -1,6 +1,6 @@
 # STAC: Spiking Transformer for Conversational AI
 
-[![DOI](https://zenodo.org/badge/907152074.svg)](https://doi.org/10.5281/zenodo.14545340)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15867066.svg)](https://doi.org/10.5281/zenodo.15867066)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
