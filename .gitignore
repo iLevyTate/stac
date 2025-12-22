@@ -314,6 +314,16 @@ user_assessments/
 *.scanue
 
 # ==========================================
+# Unpublished Dissertation Materials
+# ==========================================
+
+# Keep locally but don't publish
+docs/defense_qa.md
+docs/dissertation_defense.md
+docs/paper_comparison.md
+docs/Aligned Minds Efficient Machines Publication 3.pdf
+
+# ==========================================
 # Local Experiment & Development Files
 # ==========================================
 
