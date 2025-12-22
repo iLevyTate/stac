@@ -174,6 +174,9 @@ cython_debug/
 # STAC-Specific Ignores
 # ==========================================
 
+# Local (non-published) working notes and evidence
+local/
+
 # Large model files and training outputs
 *.pt
 *.pth
@@ -256,3 +259,110 @@ datasets/
 config_local.py
 config_override.yaml
 local_settings.py
+
+# ==========================================
+# Sensitive Data & Credentials Protection
+# ==========================================
+
+# API keys and secrets
+.env.local
+.env.*.local
+*.secret
+*.secrets
+secrets/
+credentials/
+api_keys.txt
+api_keys.json
+*.pem
+*.key
+*.crt
+
+# Authentication tokens
+.anthropic
+.openai
+.huggingface
+token.txt
+tokens.json
+auth.json
+
+# HuggingFace cache (can contain downloaded models/tokens)
+.huggingface/
+huggingface_cache/
+
+# ==========================================
+# User Data & Conversation Logs
+# ==========================================
+
+# Conversation history and user data
+conversations/
+conversation_logs/
+chat_history/
+user_data/
+user_profiles/
+*_conversation.json
+*_chat.json
+session_*.json
+
+# SCANAQ/SCANUE user assessment data (sensitive psychometric data)
+scanaq_results/
+scanue_profiles/
+assessment_data/
+psychometric_data/
+user_assessments/
+*.scanaq
+*.scanue
+
+# ==========================================
+# Local Experiment & Development Files
+# ==========================================
+
+# Personal notes and drafts
+notes/
+drafts/
+todo.txt
+TODO.md
+personal/
+private/
+
+# Local experiment results
+experiment_results/
+local_results/
+my_experiments/
+test_runs/
+debug_output/
+
+# Temporary analysis files
+analysis/
+*.analysis.json
+*.debug.json
+
+# Loihi constraint reports (may contain local paths)
+loihi_constraints_reports/
+*_loihi_report.json
+
+# Training run outputs
+runs/
+wandb/
+tensorboard_logs/
+mlruns/
+
+# ==========================================
+# Large Files & Model Artifacts
+# ==========================================
+
+# Downloaded models (use .gitkeep in directories if needed)
+downloaded_models/
+pretrained/
+*.onnx
+*.tflite
+
+# Quantized models
+quantized/
+int8_models/
+
+# ==========================================
+# Claude Code / AI Assistant Artifacts
+# ==========================================
+
+# Claude Code plans and session data
+.claude/
