@@ -61,11 +61,21 @@ STAC V1 demonstrated several key innovations:
 ## Usage
 
 ```bash
-# Open the Jupyter notebook
+# Option A: Open the original notebook (Colab-first artifact)
 jupyter notebook stac-v1/stacv1.ipynb
 
-# Or view in VS Code
-code stac-v1/stacv1.ipynb
+# Option B: Run the repo-native STAC V1 pipeline smoke (recommended here)
+# Demonstrates *hybrid fine-tuning*: frozen GPT-2 backbone + trained spiking/memory head
+# Writes a simulation-time Loihi constraints report under stac_v1_output/
+python run_stac_v1.py --model_name sshleifer/tiny-gpt2 --steps 3
+
+# Provide your own texts (either a file, or repeated --text args)
+python run_stac_v1.py --model_name sshleifer/tiny-gpt2 --texts_file .\\local\\paper_excerpts.txt --steps 5
+python run_stac_v1.py --model_name sshleifer/tiny-gpt2 --text "Hello." --text "Neuromorphic edge is constrained." --steps 3
+
+# Optional checkpointing (weights + config + last_run_summary snapshot)
+python run_stac_v1.py --model_name sshleifer/tiny-gpt2 --steps 3 --checkpoint_out .\\stac_v1_output\\checkpoint.pth
+python run_stac_v1.py --model_name sshleifer/tiny-gpt2 --steps 1 --checkpoint_in  .\\stac_v1_output\\checkpoint.pth
 ```
 
 ## Evolution to STAC V2

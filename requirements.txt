@@ -1,5 +1,7 @@
 # Core PyTorch and ML Framework
-torch>=2.0.0,<2.6.0
+# NOTE: Python 3.13 wheels are available for torch>=2.6.0. If you are on Python<=3.12,
+# torch 2.0–2.5 may be appropriate; keep this in sync with your Python runtime.
+torch>=2.6.0,<3.0.0
 transformers>=4.30.0,<4.50.0
 numpy>=1.24.0,<2.0.0
 
@@ -13,6 +15,9 @@ accelerate>=0.20.0,<0.35.0
 
 # Machine Learning Utilities
 scikit-learn>=1.2.0,<1.6.0
+
+# Parameter-efficient finetuning (LoRA adapters for distillation)
+peft>=0.12.0,<0.17.0
 
 # Progress Monitoring and Visualization
 tqdm>=4.65.0
