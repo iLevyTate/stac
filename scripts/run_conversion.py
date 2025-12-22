@@ -252,52 +252,29 @@ def export_torchscript(model, output_path):
                     import lava.lib.dl.slayer as slayer
                     has_lava_slayer = True
                 except ImportError:
-                    logger.warning("Warning: lava.lib.dl.slayer not found, using simplified Loihi mapping")
+                    logger.warning("lava.lib.dl.slayer not found; skipping Loihi mapping (simulation-only export).")
                     has_lava_slayer = False
                 
-                # Create Loihi memory map
-                loihi_config = {
-                    "neuron_model": "LIF",  # Loihi supports LIF neuron models
-                    "threshold": 1.0,        # Default threshold value
-                    "tau_mem": 2.0,          # Default membrane time constant
-                    "tau_syn": 4.0,          # Default synaptic time constant
-                    "core_mapping": "auto",  # Auto mapping to cores
-                    "synapse_encoding": "sparse", # Sparse weight encoding
-                    "weight_precision": 8,    # 8-bit weight precision
-                }
-                
-                # Apply Loihi-specific optimizations
                 if has_lava_slayer:
+                    # Create Loihi memory map
+                    loihi_config = {
+                        "neuron_model": "LIF",  # Loihi supports LIF neuron models
+                        "threshold": 1.0,        # Default threshold value
+                        "tau_mem": 2.0,          # Default membrane time constant
+                        "tau_syn": 4.0,          # Default synaptic time constant
+                        "core_mapping": "auto",  # Auto mapping to cores
+                        "synapse_encoding": "sparse", # Sparse weight encoding
+                        "weight_precision": 8,    # 8-bit weight precision
+                    }
+                    
                     # Process the model with SLAYER for Loihi compatibility
                     loihi_processor = slayer.utils.LoihiProcessor(model, config=loihi_config)
                     model = loihi_processor.process()
+                    model._loihi_config = loihi_config
+                    model._is_loihi_compatible = True
                     logger.info("Applied full Loihi mapping using SLAYER")
                 else:
-                    # Apply simplified Loihi compatibility mapping
-                    # Mark the neuron types and core allocation
-                    for name, module in model.named_modules():
-                        # Tag LIF neurons for Loihi mapping
-                        if "LIF" in module.__class__.__name__:
-                            module._loihi_neuron_type = "LIF"
-                            module._loihi_core_id = hash(name) % 128  # Simple hash-based core allocation
-                            
-                            # Set Loihi-compatible parameters
-                            if hasattr(module, "v_threshold"):
-                                # Ensure threshold is compatible with Loihi hardware
-                                if isinstance(module.v_threshold, torch.Tensor):
-                                    # Loihi prefers scalar thresholds
-                                    module.v_threshold = torch.tensor(loihi_config["threshold"], 
-                                                                     device=module.v_threshold.device)
-                                else:
-                                    module.v_threshold = loihi_config["threshold"]
-                    
-                    # Add metadata for Loihi deployment
-                    model._loihi_config = loihi_config
-                    logger.info("Applied simplified Loihi mapping")
-                
-                # Add Loihi export flag to model metadata
-                model._is_loihi_compatible = True
-                logger.info("Loihi memory mapping complete")
+                    logger.info("Loihi mapping not applied; model remains in software-simulation mode.")
             
             except Exception as e:
                 logger.warning(f"Warning: Loihi mapping failed with error: {e}")
