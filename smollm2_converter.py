@@ -95,14 +95,23 @@ class SpikeLayerNorm(nn.Module):
 
 # Spike-compatible softmax
 class SpikeSoftmax(nn.Module):
-    """Spiking-compatible softmax implementation using spike rates."""
+    """Spiking-compatible softmax implementation using spike rates.
+
+    Note: Temperature scaling is disabled (T=1.0) to preserve sharp attention
+    distributions. The original T-based scaling caused near-uniform attention,
+    leading to degenerate text generation (repeated commas/tokens).
+    """
     def __init__(self, T=16, dim=-1):
         super().__init__()
-        self.T = T
+        # Store T for compatibility but use T=1.0 for actual softmax
+        # to preserve attention sharpness and text generation quality
+        self._T_stored = T
         self.dim = dim
-    
+
     def forward(self, x):
-        return torch.softmax(x / self.T, dim=self.dim)
+        # Use standard softmax without temperature scaling
+        # Temperature scaling by T caused near-uniform attention distributions
+        return torch.softmax(x, dim=self.dim)
 
 class SpikeAttention(nn.Module):
     """Spiking-compatible self-attention implementation."""
@@ -201,6 +210,353 @@ class SpikeAttention(nn.Module):
         else:
             return output if not use_cache else (output, present)
 
+
+class LoihiCausalContextMixer(nn.Module):
+    """
+    Loihi-oriented attention replacement.
+
+    Goal: remove dense QK^T / softmax attention (a hard Loihi export blocker) and replace it with
+    a causal, recurrent context mechanism that is closer to event-driven primitives.
+
+    This is a research approximation intended for export-readiness checks, not a drop-in quality match.
+    """
+
+    def __init__(self, hidden_size: int, *, context_size: Optional[int] = None):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.context_size = int(context_size) if context_size is not None else hidden_size
+
+        self.ctx_in = nn.Linear(hidden_size, self.context_size, bias=True)
+        self.ctx_out = nn.Linear(self.context_size, hidden_size, bias=True)
+
+        # alpha in (0,1); higher alpha = longer memory. Initialize near slow decay.
+        self._logit_alpha = nn.Parameter(torch.tensor(2.0))
+
+        self.mix = nn.Linear(hidden_size * 2, hidden_size, bias=True)
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        layer_past=None,
+        head_mask=None,
+        use_cache=False,
+        output_attentions=False,
+        **kwargs,
+    ):
+        batch_size, seq_len, _ = hidden_states.shape
+        alpha = torch.sigmoid(self._logit_alpha)
+
+        c = torch.zeros(batch_size, self.context_size, device=hidden_states.device, dtype=hidden_states.dtype)
+        outs = []
+
+        for t in range(seq_len):
+            x_t = hidden_states[:, t, :]
+            u_t = torch.tanh(self.ctx_in(x_t))
+            c = alpha * c + (1.0 - alpha) * u_t
+            ctx_t = self.ctx_out(c)
+            y_t = self.mix(torch.cat([x_t, ctx_t], dim=-1))
+            outs.append(y_t.unsqueeze(1))
+
+        output = torch.cat(outs, dim=1)
+        present = layer_past if use_cache else None
+
+        if output_attentions:
+            return output, present, None
+        return output if not use_cache else (output, present)
+
+
+def _fake_int8_quantize_tensor(w: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Per-tensor symmetric fake int8 quantization.
+    Returns (qweight_int8, scale_float32) where dequant = qweight.float() * scale.
+    """
+    with torch.no_grad():
+        w_fp32 = w.detach().to(dtype=torch.float32)
+        max_abs = float(w_fp32.abs().max().item()) if w_fp32.numel() > 0 else 0.0
+        scale = max(max_abs / 127.0, 1e-8)
+        q = torch.clamp(torch.round(w_fp32 / scale), -127, 127).to(torch.int8)
+        return q, torch.tensor(scale, dtype=torch.float32, device=w.device)
+
+
+class QuantizedLinearLike(nn.Module):
+    """
+    Fake-quantized linear-like module.
+    - Stores int8 weights + float scale as buffers.
+    - Computes in float at runtime (simulation), but demonstrates representability.
+    """
+
+    def __init__(self, *, qweight: torch.Tensor, scale: torch.Tensor, bias: Optional[torch.Tensor], transpose_weight: bool):
+        super().__init__()
+        self.register_buffer("qweight", qweight)
+        self.register_buffer("scale", scale)
+        self.transpose_weight = bool(transpose_weight)
+        if bias is not None:
+            self.register_buffer("bias", bias.detach())
+        else:
+            self.bias = None
+        self._stac_fake_quant_bits = 8
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w = self.qweight.to(dtype=x.dtype) * self.scale.to(dtype=x.dtype)
+        if self.transpose_weight:
+            y = torch.matmul(x, w.transpose(-1, -2))
+        else:
+            y = torch.matmul(x, w)
+        if self.bias is not None:
+            y = y + self.bias.to(dtype=y.dtype)
+        return y
+
+
+class QuantizedEmbedding(nn.Module):
+    """Fake-quantized embedding table."""
+
+    def __init__(self, *, qweight: torch.Tensor, scale: torch.Tensor):
+        super().__init__()
+        self.register_buffer("qweight", qweight)
+        self.register_buffer("scale", scale)
+        self._stac_fake_quant_bits = 8
+
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        w = self.qweight.to(dtype=torch.float32) * self.scale.to(dtype=torch.float32)
+        out = torch.index_select(w, 0, input_ids.view(-1)).view(*input_ids.shape, -1)
+        return out.to(dtype=torch.float32)
+
+
+class HashedEmbedding(nn.Module):
+    """
+    Token embedding compression via hashing/bucketing.
+
+    This reduces the embedding table size from vocab_size x hidden to num_buckets x hidden.
+    Token IDs are mapped to buckets by modulo (deterministic, cheap).
+    """
+
+    def __init__(self, weight: torch.Tensor, num_buckets: int):
+        super().__init__()
+        if num_buckets <= 0:
+            raise ValueError("num_buckets must be > 0")
+        self.num_buckets = int(num_buckets)
+        self.hidden_size = int(weight.shape[1])
+        # store bucket weights as a Parameter to participate in pruning if desired
+        self.weight = nn.Parameter(weight)
+
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        bucket_ids = torch.remainder(input_ids, self.num_buckets)
+        out = torch.index_select(self.weight, 0, bucket_ids.view(-1)).view(*bucket_ids.shape, -1)
+        return out
+
+
+class QuantizedHashedEmbedding(nn.Module):
+    """Fake-quantized hashed embedding (int8 + scale)."""
+
+    def __init__(self, *, qweight: torch.Tensor, scale: torch.Tensor, num_buckets: int):
+        super().__init__()
+        self.register_buffer("qweight", qweight)
+        self.register_buffer("scale", scale)
+        self.num_buckets = int(num_buckets)
+        self._stac_fake_quant_bits = 8
+
+    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        bucket_ids = torch.remainder(input_ids, self.num_buckets)
+        w = self.qweight.to(dtype=torch.float32) * self.scale.to(dtype=torch.float32)
+        out = torch.index_select(w, 0, bucket_ids.view(-1)).view(*bucket_ids.shape, -1)
+        return out.to(dtype=torch.float32)
+
+
+def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn.Module:
+    """
+    Replace token embedding table (GPT-2 wte) with bucketed/hashed embedding weights.
+    Initializes bucket weights by averaging original embeddings that map to each bucket.
+    """
+    if num_buckets <= 0:
+        return model
+
+    replaced = 0
+    for name, module in list(model.named_modules()):
+        if not isinstance(module, nn.Embedding):
+            continue
+        # Heuristic: only apply to token embeddings, not positional embeddings
+        if not (name.endswith("wte") or ".wte" in name):
+            continue
+
+        w = module.weight.detach()
+        vocab, hidden = w.shape
+        nb = int(num_buckets)
+        device = w.device
+
+        with torch.no_grad():
+            bucket_w = torch.zeros((nb, hidden), device=device, dtype=w.dtype)
+            counts = torch.zeros((nb,), device=device, dtype=torch.float32)
+            ids = torch.arange(vocab, device=device)
+            buckets = torch.remainder(ids, nb)
+            bucket_w.index_add_(0, buckets, w)
+            counts.index_add_(0, buckets, torch.ones_like(ids, dtype=torch.float32))
+            counts = torch.clamp(counts, min=1.0).unsqueeze(1)
+            bucket_w = bucket_w / counts
+
+        # Replace module
+        path = name.split(".")
+        parent = model
+        for attr in path[:-1]:
+            parent = getattr(parent, attr)
+        setattr(parent, path[-1], HashedEmbedding(bucket_w, nb))
+        replaced += 1
+        logger.info(f"Replaced token embedding {name} with HashedEmbedding(num_buckets={nb})")
+
+    logger.info(f"Loihi embedding bucketing: replaced {replaced} embedding modules")
+    return model
+
+
+def apply_fake_int8_quantization_for_loihi(model: nn.Module) -> nn.Module:
+    """
+    Replace common heavy weight modules with fake-quantized wrappers:
+    - nn.Linear
+    - transformers Conv1D (class name 'Conv1D') and similar linear-like modules with weight+bias
+    - nn.Embedding
+    """
+    replaced = 0
+    for name, module in list(model.named_modules()):
+        # find parent
+        path = name.split(".")
+        parent_path = ".".join(path[:-1])
+        child = path[-1]
+        parent = model
+        if not name:
+            continue
+        for attr in path[:-1]:
+            parent = getattr(parent, attr)
+
+        cn = module.__class__.__name__
+
+        # Embedding (standard)
+        if isinstance(module, nn.Embedding):
+            q, s = _fake_int8_quantize_tensor(module.weight)
+            setattr(parent, child, QuantizedEmbedding(qweight=q.to(module.weight.device), scale=s.to(module.weight.device)))
+            replaced += 1
+            continue
+
+        # Hashed embedding
+        if isinstance(module, HashedEmbedding):
+            q, s = _fake_int8_quantize_tensor(module.weight)
+            setattr(
+                parent,
+                child,
+                QuantizedHashedEmbedding(
+                    qweight=q.to(module.weight.device),
+                    scale=s.to(module.weight.device),
+                    num_buckets=module.num_buckets,
+                ),
+            )
+            replaced += 1
+            continue
+
+        # Linear
+        if isinstance(module, nn.Linear):
+            q, s = _fake_int8_quantize_tensor(module.weight)
+            bias = module.bias if module.bias is not None else None
+            setattr(
+                parent,
+                child,
+                QuantizedLinearLike(
+                    qweight=q.to(module.weight.device),
+                    scale=s.to(module.weight.device),
+                    bias=bias.detach() if bias is not None else None,
+                    transpose_weight=True,
+                ),
+            )
+            replaced += 1
+            continue
+
+        # Conv1D-like (Transformers) or other linear-like modules: has weight, optional bias, and forward uses x @ weight (+ bias)
+        if hasattr(module, "weight") and isinstance(getattr(module, "weight"), torch.Tensor) and cn == "Conv1D":
+            w = getattr(module, "weight")
+            b = getattr(module, "bias", None)
+            q, s = _fake_int8_quantize_tensor(w)
+            setattr(
+                parent,
+                child,
+                QuantizedLinearLike(
+                    qweight=q.to(w.device),
+                    scale=s.to(w.device),
+                    bias=b.detach() if isinstance(b, torch.Tensor) else None,
+                    transpose_weight=False,
+                ),
+            )
+            replaced += 1
+            continue
+
+    logger.info(f"Loihi fake-quant pass: replaced {replaced} modules with fake int8 wrappers")
+    return model
+
+
+def apply_magnitude_pruning_for_loihi(
+    model: nn.Module,
+    *,
+    target_sparsity: float = 0.5,
+    name_substrings: Tuple[str, ...] = ("mlp", "ctx_in", "ctx_out", "mix", "c_fc", "c_proj"),
+) -> nn.Module:
+    """
+    Simple magnitude pruning to introduce sparsity for Loihi-readiness signals.
+
+    - Prunes weights (not biases) in nn.Linear and Conv1D modules whose names contain any of name_substrings.
+    - Sets smallest-magnitude weights to zero to reach target_sparsity.
+    """
+    target_sparsity = float(target_sparsity)
+    if not (0.0 <= target_sparsity < 1.0):
+        raise ValueError(f"target_sparsity must be in [0,1). Got {target_sparsity}")
+
+    pruned_tensors = 0
+    total_pruned = 0
+    total_numel = 0
+
+    for name, module in model.named_modules():
+        if not any(s in name for s in name_substrings):
+            continue
+
+        cn = module.__class__.__name__
+        weight = None
+
+        if isinstance(module, nn.Linear):
+            weight = module.weight
+        elif cn == "Conv1D" and hasattr(module, "weight") and isinstance(getattr(module, "weight"), torch.Tensor):
+            weight = getattr(module, "weight")
+        else:
+            continue
+
+        if weight is None or weight.numel() == 0:
+            continue
+
+        with torch.no_grad():
+            w = weight.detach()
+            total_numel += int(w.numel())
+            k = int(target_sparsity * w.numel())
+            if k <= 0:
+                continue
+
+            flat = w.abs().view(-1)
+            # threshold at kth smallest magnitude
+            thresh, _ = torch.kthvalue(flat, k)
+            mask = (w.abs() > thresh).to(w.dtype)
+            # Ensure exact sparsity isn't critical; this is heuristic
+            new_w = w * mask
+            pruned_now = int((w.numel() - torch.count_nonzero(new_w)).item())
+            total_pruned += pruned_now
+            pruned_tensors += 1
+
+            if isinstance(module, nn.Linear):
+                module.weight.copy_(new_w)
+            else:
+                # Transformers Conv1D uses nn.Parameter for weight; keep it a Parameter and update data in-place.
+                if isinstance(module.weight, torch.nn.Parameter):
+                    module.weight.data.copy_(new_w)
+                else:
+                    module.weight = new_w
+
+    setattr(model, "_stac_loihi_pruned", True)
+    setattr(model, "_stac_loihi_prune_target", target_sparsity)
+    logger.info(f"Loihi prune pass: pruned {total_pruned}/{total_numel} weights across {pruned_tensors} tensors (target={target_sparsity:.2f})")
+    return model
+
 # SNN Temporal Container for Autoregressive Processing
 class TemporalSpikeProcessor(nn.Module):
     """Processes input through SNN model over multiple timesteps."""
@@ -217,6 +573,11 @@ class TemporalSpikeProcessor(nn.Module):
         self.batch_kv_caches = {}
         # Placeholder for last computed position IDs (for testing)
         self._last_position_ids = None
+        # Optional token-cache for incremental (turn-by-turn) usage
+        self._token_cache_input_ids = None
+        self._token_cache_attention_mask = None
+        # Learnable scalar to align student logit magnitudes with ANN teacher during distillation
+        self.logit_scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
         # logger.info(f"Created temporal spike processor with T={T}, max_context_length={max_context_length}, device={self.device}")
     
     def _create_position_ids(self, input_shape, past_length=0):
@@ -241,7 +602,7 @@ class TemporalSpikeProcessor(nn.Module):
         # Expand to match batch size
         return position_ids.expand(batch_size, -1)
     
-    def forward(self, input_ids, attention_mask=None, use_cache=True, batch_ids=None, **kwargs):
+    def forward(self, input_ids, attention_mask=None, use_cache=True, batch_ids=None, incremental=False, **kwargs):
         """
         Process input through the SNN model using temporal processing with batch support.
         
@@ -250,11 +611,39 @@ class TemporalSpikeProcessor(nn.Module):
             attention_mask: Optional attention mask
             use_cache: Whether to use and update KV cache for efficient conversation
             batch_ids: Optional list/tensor of unique conversation IDs for multi-conversation batching
+            incremental: If True, treat input_ids as *new tokens only* and append to an internal token cache
             
         Returns:
             Tensor with accumulated logits
         """
         batch_size, seq_length = input_ids.shape
+
+        # Optional incremental token cache behavior for multi-turn state retention
+        if incremental:
+            if self._token_cache_input_ids is None:
+                self._token_cache_input_ids = input_ids
+                if attention_mask is None:
+                    self._token_cache_attention_mask = torch.ones_like(input_ids, dtype=torch.long)
+                else:
+                    self._token_cache_attention_mask = attention_mask
+            else:
+                self._token_cache_input_ids = torch.cat([self._token_cache_input_ids, input_ids], dim=1)
+                if self._token_cache_attention_mask is None:
+                    self._token_cache_attention_mask = torch.ones_like(self._token_cache_input_ids, dtype=torch.long)
+                else:
+                    add_mask = torch.ones_like(input_ids, dtype=torch.long) if attention_mask is None else attention_mask
+                    self._token_cache_attention_mask = torch.cat([self._token_cache_attention_mask, add_mask], dim=1)
+
+            # Enforce max context length on the cache
+            if self._token_cache_input_ids.size(1) > self.max_context_length:
+                self._token_cache_input_ids = self._token_cache_input_ids[:, -self.max_context_length:]
+                if self._token_cache_attention_mask is not None:
+                    self._token_cache_attention_mask = self._token_cache_attention_mask[:, -self.max_context_length:]
+
+            # Use cached full context for the actual forward pass
+            input_ids = self._token_cache_input_ids
+            attention_mask = self._token_cache_attention_mask
+            batch_size, seq_length = input_ids.shape
         
         # Ensure input doesn't exceed max context length
         if seq_length > self.max_context_length:
@@ -264,6 +653,12 @@ class TemporalSpikeProcessor(nn.Module):
                 attention_mask = attention_mask[:, -self.max_context_length:]
             batch_size, seq_length = input_ids.shape
         
+        # In Loihi mode, avoid HuggingFace KV-cache semantics; rely on token cache / sequential processing instead.
+        # Some attention replacements (e.g., LoihiCausalContextMixer) do not produce valid past_key_values and can
+        # poison the cache with None entries.
+        if bool(getattr(self.snn_model, "_stac_loihi_mode", False)):
+            use_cache = False
+
         # Handle batch-specific KV caches if batch_ids provided
         if batch_ids is not None:
             # Convert batch_ids to list if it's a tensor
@@ -326,64 +721,72 @@ class TemporalSpikeProcessor(nn.Module):
         # Reset all neuron states in the model before processing
         functional.reset_net(self.snn_model)
         
-        # For debugging: Use single timestep to preserve logit quality
         # Process over T timesteps to accumulate spikes
-        spike_accum = 0
+        spike_accum = None
         present_key_values = None
         
-        # Temporarily use just 1 timestep for better generation
-        effective_T = 1  # self.T
-        for t in range(effective_T):
-            with torch.no_grad():
-                # In real implementation, the model would process spikes over time
-                # When using cache, we only need to process the new tokens
-                model_kwargs = {}
-                
-                # -----------------  KV Cache & Position Handling -----------------
-                using_kv_cache = past_key_values is not None
-                model_input_ids = input_ids  # By default feed full sequence
-                if using_kv_cache:
-                    # Only feed the NEW tokens to the model to avoid size mismatch
-                    past_length = past_key_values[0][0].size(-2)
-                    if seq_length > past_length:
-                        model_input_ids = input_ids[:, past_length:]
-                    else:
-                        # Fallback: at least feed the last token
-                        model_input_ids = input_ids[:, -1:]
-                # -----------------------------------------------------------------
-                
-                # Ensure attention_mask is valid
-                if attention_mask is None:
-                    attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long, device=input_ids.device)
-                
-                # Add attention mask to kwargs
-                model_kwargs['attention_mask'] = attention_mask
-                
-                # Add past_key_values if available
-                if use_cache:
-                    model_kwargs['use_cache'] = True
-                if past_key_values is not None:
-                    model_kwargs['past_key_values'] = past_key_values
-                
-                # Forward pass through the model
-                outputs = self.snn_model(model_input_ids, **model_kwargs)
-                
-                # Get the logits from output structure
-                if hasattr(outputs, 'logits'):
-                    # Standard HF model output
-                    current_logits = outputs.logits
-                    if hasattr(outputs, 'past_key_values') and outputs.past_key_values is not None:
-                        present_key_values = outputs.past_key_values
+        effective_T = max(1, int(self.T))
+        for _ in range(effective_T):
+            # Allow gradients when caller enables them (needed for distillation / adapter finetune).
+            # Do not wrap in torch.no_grad(); the caller controls grad mode.
+            model_kwargs = {}
+
+            # -----------------  KV Cache & Position Handling -----------------
+            # Validate cache structure to avoid None poisoning
+            using_kv_cache = (
+                past_key_values is not None
+                and isinstance(past_key_values, (list, tuple))
+                and len(past_key_values) > 0
+                and isinstance(past_key_values[0], (list, tuple))
+                and len(past_key_values[0]) >= 1
+                and past_key_values[0][0] is not None
+            )
+            model_input_ids = input_ids  # By default feed full sequence
+            if using_kv_cache:
+                # Only feed the NEW tokens to the model to avoid size mismatch
+                past_length = past_key_values[0][0].size(-2)
+                if seq_length > past_length:
+                    model_input_ids = input_ids[:, past_length:]
                 else:
-                    # Tuple output (logits, past_key_values)
-                    if isinstance(outputs, tuple) and len(outputs) >= 2:
-                        current_logits = outputs[0]
-                        present_key_values = outputs[1]
-                    else:
-                        # Direct logits output
-                        current_logits = outputs
-                
-                spike_accum += current_logits
+                    # Fallback: at least feed the last token
+                    model_input_ids = input_ids[:, -1:]
+            # -----------------------------------------------------------------
+
+            # Ensure attention_mask is valid
+            if attention_mask is None:
+                attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long, device=input_ids.device)
+
+            # Add attention mask to kwargs
+            model_kwargs["attention_mask"] = attention_mask
+
+            # Add past_key_values if available
+            if use_cache:
+                model_kwargs["use_cache"] = True
+            if past_key_values is not None:
+                model_kwargs["past_key_values"] = past_key_values
+
+            # Forward pass through the model
+            outputs = self.snn_model(model_input_ids, **model_kwargs)
+
+            # Get the logits from output structure
+            if hasattr(outputs, "logits"):
+                # Standard HF model output
+                current_logits = outputs.logits
+                if hasattr(outputs, "past_key_values") and outputs.past_key_values is not None:
+                    present_key_values = outputs.past_key_values
+            else:
+                # Tuple output (logits, past_key_values)
+                if isinstance(outputs, tuple) and len(outputs) >= 2:
+                    current_logits = outputs[0]
+                    present_key_values = outputs[1]
+                else:
+                    # Direct logits output
+                    current_logits = outputs
+
+            if spike_accum is None:
+                spike_accum = current_logits
+            else:
+                spike_accum = spike_accum + current_logits
         
         # Update cache if needed
         if use_cache and present_key_values is not None:
@@ -417,7 +820,20 @@ class TemporalSpikeProcessor(nn.Module):
         
         # Scale accumulated spikes to restore original logit magnitudes
         # SNN conversion typically reduces magnitudes significantly, so we need strong scaling
-        final_logits = spike_accum  # Use raw accumulation without averaging
+        if spike_accum is None:
+            vocab = getattr(self.snn_model.config, "vocab_size", None)
+            if vocab is None:
+                raise RuntimeError("TemporalSpikeProcessor could not produce logits and vocab_size is unknown.")
+            final_logits = torch.zeros(
+                (batch_size, seq_length, vocab),
+                device=input_ids.device,
+                dtype=torch.float32,
+            )
+        else:
+            final_logits = spike_accum / effective_T  # Normalize accumulated spikes by timestep count
+
+        # Apply learnable logit scaling (helps distillation/parity)
+        final_logits = final_logits * self.logit_scale.to(dtype=final_logits.dtype)
 
         # Ensure logits sequence length matches original input_ids length so downstream
         # tests that compare shapes do not fail, even if internal model shortened due to
@@ -475,6 +891,8 @@ class TemporalSpikeProcessor(nn.Module):
         else:
             # Clear global cache entirely
             self.kv_cache = None
+            self._token_cache_input_ids = None
+            self._token_cache_attention_mask = None
             
             # Also reset all batch-specific caches
             self.batch_kv_caches = {}
@@ -485,6 +903,21 @@ class TemporalSpikeProcessor(nn.Module):
             return self._last_position_ids.clone().detach()
         # Fallback: return zero tensor
         return torch.zeros(1, dtype=torch.long, device=self.device)
+
+    def get_cached_input_length(self) -> int:
+        """Return cached context length in tokens (incremental mode), or 0 if none."""
+        if self._token_cache_input_ids is None:
+            return 0
+        return int(self._token_cache_input_ids.size(1))
+
+    # ---- HuggingFace/PEFT compatibility helpers ----
+    def prepare_inputs_for_generation(self, *args, **kwargs):
+        """
+        Delegate to inner model when available. PEFT expects CausalLM models to implement this.
+        """
+        if hasattr(self.snn_model, "prepare_inputs_for_generation"):
+            return self.snn_model.prepare_inputs_for_generation(*args, **kwargs)
+        raise AttributeError("Inner model does not implement prepare_inputs_for_generation")
 
 def parse_args():
     """Parse command-line arguments."""
@@ -677,18 +1110,19 @@ def replace_attention_with_spikeattention(model):
                             
                             # Check the shape format - GPT-2 uses [hidden_size, 3*hidden_size]
                             if qkv_weight.size(0) == hidden_size and qkv_weight.size(1) == 3 * hidden_size:
-                                # GPT-2 style format with transposed weights
+                                # GPT-2 style format - Conv1D stores weights as [in, out]
+                                # but Linear expects [out, in], so we need to transpose
                                 logger.info(f"Detected GPT-2 style QKV format: {qkv_weight.shape}")
-                                
+
                                 # Split the weights along dimension 1 - GPT-2 has them as [h, 3h]
                                 q_weight, k_weight, v_weight = torch.chunk(qkv_weight, 3, dim=1)
                                 q_bias, k_bias, v_bias = torch.chunk(qkv_bias, 3, dim=0)
-                                
-                                # Copy to new layers
-                                spike_attn.q_proj.weight.data.copy_(q_weight)
-                                spike_attn.k_proj.weight.data.copy_(k_weight)
-                                spike_attn.v_proj.weight.data.copy_(v_weight)
-                                
+
+                                # Copy to new layers - MUST transpose from Conv1D [in, out] to Linear [out, in]
+                                spike_attn.q_proj.weight.data.copy_(q_weight.t())
+                                spike_attn.k_proj.weight.data.copy_(k_weight.t())
+                                spike_attn.v_proj.weight.data.copy_(v_weight.t())
+
                                 spike_attn.q_proj.bias.data.copy_(q_bias)
                                 spike_attn.k_proj.bias.data.copy_(k_bias)
                                 spike_attn.v_proj.bias.data.copy_(v_bias)
@@ -717,10 +1151,10 @@ def replace_attention_with_spikeattention(model):
                                 if qkv_weight.dim() == 2:
                                     # See if it's a transposed version or other format
                                     if qkv_weight.size(1) % 3 == 0:
-                                        # Probably a transposed format [hidden_size, something*3]
+                                        # Conv1D format [hidden_size, something*3] - needs transpose
                                         split_size = qkv_weight.size(1) // 3
                                         q_weight, k_weight, v_weight = torch.split(qkv_weight, split_size, dim=1)
-                                        
+
                                         # Try to split bias similarly
                                         if qkv_bias.size(0) % 3 == 0:
                                             bias_split = qkv_bias.size(0) // 3
@@ -728,12 +1162,12 @@ def replace_attention_with_spikeattention(model):
                                         else:
                                             # Just duplicate bias if we can't split
                                             q_bias = k_bias = v_bias = qkv_bias
-                                            
-                                        # Copy to new layers
-                                        spike_attn.q_proj.weight.data.copy_(q_weight)
-                                        spike_attn.k_proj.weight.data.copy_(k_weight)
-                                        spike_attn.v_proj.weight.data.copy_(v_weight)
-                                        
+
+                                        # Copy to new layers - transpose from Conv1D [in, out] to Linear [out, in]
+                                        spike_attn.q_proj.weight.data.copy_(q_weight.t())
+                                        spike_attn.k_proj.weight.data.copy_(k_weight.t())
+                                        spike_attn.v_proj.weight.data.copy_(v_weight.t())
+
                                         spike_attn.q_proj.bias.data.copy_(q_bias)
                                         spike_attn.k_proj.bias.data.copy_(k_bias)
                                         spike_attn.v_proj.bias.data.copy_(v_bias)
@@ -766,8 +1200,9 @@ def replace_attention_with_spikeattention(model):
                                     logger.warning(f"Unexpected QKV weight tensor dimension: {qkv_weight.dim()}. Using default initialization.")
                             
                             # Copy output projection if available
+                            # c_proj is also Conv1D, so transpose weights from [in, out] to [out, in]
                             if hasattr(block.attn, 'c_proj'):
-                                spike_attn.o_proj.weight.data.copy_(block.attn.c_proj.weight.data)
+                                spike_attn.o_proj.weight.data.copy_(block.attn.c_proj.weight.data.t())
                                 spike_attn.o_proj.bias.data.copy_(block.attn.c_proj.bias.data)
                         
                         # Check if using separate Q, K, V projections
@@ -902,12 +1337,73 @@ def replace_attention_with_spikeattention(model):
     logger.info(f"Replaced {attn_count} attention blocks with SpikeAttention")
     return model
 
-def simplified_conversion(model, timesteps=32):
-    """Perform simplified conversion without relying on SpikingJelly."""
+
+def replace_attention_with_loihi_mixer(model):
+    """
+    Replace attention modules with LoihiCausalContextMixer to avoid dense QK^T softmax attention.
+    """
+    model_type = ""
+    if hasattr(model, "config") and hasattr(model.config, "model_type"):
+        model_type = str(model.config.model_type).lower()
+    attn_count = 0
+
+    for name, module in model.named_modules():
+        if ("attn" in name or "attention" in name.lower()) and hasattr(module, "forward"):
+            parent_path = ".".join(name.split(".")[:-1])
+            child_name = name.split(".")[-1]
+
+            if not parent_path:
+                continue
+
+            try:
+                parent = model
+                for attr in parent_path.split("."):
+                    parent = getattr(parent, attr)
+
+                hidden_size = None
+                if hasattr(model, "config"):
+                    hidden_size = getattr(model.config, "hidden_size", None)
+                if hidden_size is None:
+                    # fallback: try to infer from common GPT-2 naming
+                    hidden_size = getattr(getattr(model, "transformer", None), "embed_dim", None)
+
+                if hidden_size is None:
+                    raise RuntimeError("Could not infer hidden_size for Loihi mixer replacement.")
+
+                setattr(parent, child_name, LoihiCausalContextMixer(hidden_size=int(hidden_size)))
+                attn_count += 1
+                logger.info(f"Replaced attention at {name} with LoihiCausalContextMixer")
+            except Exception as e:
+                logger.warning(f"Failed to replace attention at {name} for model_type={model_type}: {e}")
+
+    if attn_count == 0:
+        raise NotImplementedError(
+            f"Could not find compatible attention structure in model type '{model_type}' "
+            "for Loihi mixer replacement."
+        )
+
+    logger.info(f"Replaced {attn_count} attention blocks with LoihiCausalContextMixer")
+    return model
+
+def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
+    """Perform simplified conversion without relying on SpikingJelly.
+
+    Args:
+        model: The model to convert.
+        timesteps: Number of timesteps for SNN simulation.
+        skip_gelu_replacement: If True, skip GELU->ReLU replacement. This preserves
+            text generation quality but sacrifices spike-compatibility. Set to True
+            for inference testing; set to False for actual neuromorphic deployment.
+    """
     logger.info(f"Using simplified conversion with T={timesteps}")
-    
-    # 1. Replace GELU/NewGELUActivation with ReLU
-    model = replace_gelu_with_relu(model)
+
+    # 1. Optionally replace GELU/NewGELUActivation with ReLU
+    # Note: GELU->ReLU significantly degrades text generation quality
+    # but is required for true spike-based neuromorphic execution
+    if not skip_gelu_replacement:
+        model = replace_gelu_with_relu(model)
+    else:
+        logger.info("Skipping GELU->ReLU replacement (better generation quality, less spike-compatible)")
     
     # 2. Store timesteps attribute
     model.T = timesteps
@@ -915,8 +1411,24 @@ def simplified_conversion(model, timesteps=32):
     # 3. Replace standard LayerNorm with SpikeLayerNorm
     model = replace_layernorm_with_spikelayernorm(model)
     
-    # 4. Replace Attention with SpikeAttention
-    model = replace_attention_with_spikeattention(model)
+    # 4. Replace Attention with Loihi-friendly mixer or SpikeAttention
+    loihi_mode = bool(getattr(model, "_stac_loihi_mode", False))
+    if loihi_mode:
+        logger.info("Loihi mode enabled: replacing attention with LoihiCausalContextMixer")
+        model = replace_attention_with_loihi_mixer(model)
+        embed_buckets = int(getattr(model, "_stac_loihi_embed_buckets", 0) or 0)
+        if embed_buckets > 0:
+            logger.info(f"Loihi embedding bucketing enabled: num_buckets={embed_buckets}")
+            model = apply_loihi_embedding_bucketing(model, num_buckets=embed_buckets)
+        if bool(getattr(model, "_stac_loihi_prune", False)):
+            target = float(getattr(model, "_stac_loihi_prune_target", 0.5))
+            logger.info(f"Loihi prune enabled: applying magnitude pruning (target_sparsity={target:.2f})")
+            model = apply_magnitude_pruning_for_loihi(model, target_sparsity=target)
+        if bool(getattr(model, "_stac_loihi_quantize", False)):
+            logger.info("Loihi quantize enabled: applying fake int8 quantization pass")
+            model = apply_fake_int8_quantization_for_loihi(model)
+    else:
+        model = replace_attention_with_spikeattention(model)
     
     # 5. Add a wrapper for temporal processing
     model = TemporalSpikeProcessor(model, T=timesteps)
