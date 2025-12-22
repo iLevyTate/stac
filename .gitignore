@@ -189,6 +189,7 @@ local/
 
 # Test outputs and temporary model files
 test_output/
+simple_test_output/
 output/
 outputs/
 checkpoints/

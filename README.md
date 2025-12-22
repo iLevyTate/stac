@@ -55,6 +55,7 @@ python test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps
 |-----------|---------|
 | `stac-v1/stacv1.ipynb` | Complete end-to-end training pipeline with learnable AdEx neurons |
 | `stac-v1/README.md` | V1 documentation and research contributions |
+| `stac_v1/` + `run_stac_v1.py` | Repo-native runnable V1 pipeline demonstrating **hybrid fine-tuning** (frozen GPT-2 + trained spiking/memory head) |
 
 ## Implementation Status
 
@@ -63,6 +64,7 @@ python test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps
 - ✅ Core conversion flow (GELU→ReLU, quantization, ann2snn)
 - ✅ Temporal dynamics & KV-cache handling in PyTorch
 - ✅ Spike-count telemetry hooks and unit tests
+- ✅ Loihi export gating (requires `EXPORT_LOIHI=1` **and** `lava.lib.dl.slayer`; otherwise remains simulation-only and Loihi tests are skipped)
 
 **Pending / In Progress**
 - ⏳ Hardware benchmarking on Loihi-2 / Akida
