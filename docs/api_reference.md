@@ -254,7 +254,7 @@ python test_conversational_snn.py [OPTIONS]
 - `--test_position_boundaries`: Test position ID boundaries
 - `--test_attention_mask`: Test attention mask continuity
 - `--test_multi_turn`: Test multi-turn capabilities
-- `--test_energy`: Test energy consumption
+- `--test_energy`: Test energy proxy (software profiling / spike-count telemetry; not hardware watt-hour measurements)
 
 ## Configuration
 

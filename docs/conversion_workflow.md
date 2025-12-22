@@ -47,7 +47,7 @@ python run_conversion.py --model_name distilgpt2 --simplified --timesteps 8
 ```
 
 ### Full Pipeline Mode
-**Purpose**: Production-ready conversion  
+**Purpose**: Research-grade conversion (experimental)  
 **Time**: 1-3 hours  
 **Features**:
 - 8-bit quantization

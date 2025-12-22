@@ -34,7 +34,7 @@
 - ✅ **PyTorch**: 2.0.0 - 2.5.x
 
 ### Planned Support (Future Work)
-- ⏳ **Intel Loihi-2**: Neuromorphic hardware deployment
+- ⏳ **Intel Loihi-2**: Neuromorphic hardware deployment (future work; no published hardware runs from this repo)
 - ⏳ **BrainChip Akida**: Edge neuromorphic processing
 - ⏳ **SpiNNaker**: Large-scale spiking neural network platform
 
