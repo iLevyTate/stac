@@ -72,11 +72,18 @@ class DLPFCAdExNeuron(nn.Module):
         dt: float = 1.0,
         exp_clamp: float = 50.0,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        exp_term = torch.exp((V - self.V_th) / self.delta_T).clamp(max=exp_clamp)
-        dV = (dt / self.tau_m) * (-(V - self.V_rest) + self.delta_T * exp_term - w + input_current)
+        # These dynamics parameters are learnable and unconstrained, so training can drive
+        # them to ~0 (or negative), producing division by ~0 / NaNs. Clamp to a small
+        # positive floor in the forward pass to keep the update numerically stable.
+        tau_m = self.tau_m.clamp(min=1e-3)
+        tau_w = self.tau_w.clamp(min=1e-3)
+        delta_T = self.delta_T.clamp(min=1e-3)
+
+        exp_term = torch.exp((V - self.V_th) / delta_T).clamp(max=exp_clamp)
+        dV = (dt / tau_m) * (-(V - self.V_rest) + delta_T * exp_term - w + input_current)
         V_new = V + dV
 
-        dw = (dt / self.tau_w) * (self.a * (V - self.V_rest) - w)
+        dw = (dt / tau_w) * (self.a * (V - self.V_rest) - w)
         w_new = w + dw
 
         spike = surrogate_spike(V_new - self.V_th)
