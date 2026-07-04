@@ -31,7 +31,7 @@
 ### Current Support
 - ✅ **Software Simulation**: Full support on CPU/GPU
 - ✅ **NVIDIA GPUs**: CUDA 11.8+ or 12.1+
-- ✅ **PyTorch**: 2.0.0 - 2.5.x
+- ✅ **PyTorch**: >= 2.2, < 3.0 (matches requirements.txt)
 
 ### Planned Support (Future Work)
 - ⏳ **Intel Loihi-2**: Neuromorphic hardware deployment (future work; no published hardware runs from this repo)
@@ -41,15 +41,16 @@
 ## Installation Notes
 
 ### CUDA Installation
+Install a torch build (>= 2.2, < 3.0) matching your CUDA runtime from the official index:
 ```bash
 # For CUDA 11.8
-pip install torch==2.3.0+cu118 -f https://download.pytorch.org/whl/torch_stable.html
+pip install torch --index-url https://download.pytorch.org/whl/cu118
 
-# For CUDA 12.1  
-pip install torch==2.3.0+cu121 -f https://download.pytorch.org/whl/torch_stable.html
+# For CUDA 12.1
+pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 # For CPU only
-pip install torch==2.3.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### SpikingJelly Installation
@@ -73,7 +74,7 @@ pip install spikingjelly[cuda] -U --pre
 ### Common Issues
 1. **CUDA Out of Memory**: Reduce batch size or use CPU fallback
 2. **SpikingJelly Version**: Ensure version >= 0.0.0.0.14
-3. **PyTorch Compatibility**: Use PyTorch 2.0.0 - 2.5.x range
+3. **PyTorch Compatibility**: Use PyTorch >= 2.2, < 3.0
 
 ### Performance Optimization
 1. Use SSD storage for faster I/O

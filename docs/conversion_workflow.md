@@ -43,7 +43,7 @@ snn_model = TemporalSpikeProcessor(converted_model, T=16)
 - Minimal calibration
 
 ```bash
-python run_conversion.py --model_name distilgpt2 --simplified --timesteps 8
+python scripts/run_conversion.py --model_name distilgpt2 --simplified --timesteps 8
 ```
 
 ### Full Pipeline Mode
@@ -55,7 +55,7 @@ python run_conversion.py --model_name distilgpt2 --simplified --timesteps 8
 - Threshold optimization
 
 ```bash
-python run_conversion.py --model_name SmolLM2-1.7B-Instruct --timesteps 16
+python scripts/run_conversion.py --model_name HuggingFaceTB/SmolLM2-1.7B-Instruct --timesteps 16
 ```
 
 ## Supported Models
@@ -111,10 +111,10 @@ The conversion process includes built-in validation:
 ### Manual Testing
 ```bash
 # Run comprehensive tests
-python test_conversational_snn.py --test_all --timesteps 16
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps 16
 
 # Test specific components
-python test_conversational_snn.py --test_multi_turn
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_multi_turn
 ```
 
 ## Output Format
