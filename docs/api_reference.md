@@ -40,10 +40,11 @@ Reset the KV cache for new conversations.
 - `batch_id` (int, optional): Specific batch to reset
 
 ##### `get_position_ids()`
-Get current position IDs for the conversation.
+Get the last computed position IDs for the conversation.
 
 **Returns:**
-- Dictionary with position ID information
+- `torch.Tensor` of shape `[1, seq_len]` containing the most recent position IDs
+  (a zero tensor if none have been computed yet).
 
 ### SpikeAttention
 
@@ -91,16 +92,20 @@ Replace GELU activations with ReLU for SNN compatibility.
 **Returns:**
 - Modified model with ReLU activations
 
-### `simplified_conversion(model, timesteps=32)`
+### `simplified_conversion(model, timesteps=32, skip_gelu_replacement=False)`
 
-Perform simplified ANN→SNN conversion.
+Perform simplified ANN→SNN conversion. Returns a `TemporalSpikeProcessor` wrapping the
+converted model.
 
 **Parameters:**
 - `model` (torch.nn.Module): Source model
 - `timesteps` (int): Number of SNN timesteps
+- `skip_gelu_replacement` (bool): If `True`, skip the GELU→ReLU substitution. This
+  preserves generation quality but is less spike-compatible; set `False` for actual
+  neuromorphic deployment.
 
 **Returns:**
-- Converted SNN model
+- `TemporalSpikeProcessor` wrapping the converted SNN model
 
 ### `replace_layernorm_with_spikelayernorm(model)`
 
@@ -224,29 +229,29 @@ Simulate a multi-turn conversation for testing.
 
 ## Command Line Interface
 
-### `run_conversion.py`
+### `scripts/run_conversion.py`
 
 Main CLI tool for model conversion.
 
 **Usage:**
 ```bash
-python run_conversion.py [OPTIONS]
+python scripts/run_conversion.py [OPTIONS]
 ```
 
 **Options:**
-- `--model_name`: Model to convert (distilgpt2, SmolLM2-1.7B-Instruct)
+- `--model_name`: Model to convert (`distilgpt2`, `HuggingFaceTB/SmolLM2-1.7B-Instruct`)
 - `--output_dir`: Output directory
 - `--timesteps`: Number of SNN timesteps
 - `--simplified`: Use simplified conversion
 - `--verify`: Run post-conversion verification
 
-### `test_conversational_snn.py`
+### `tests/test_conversational_snn.py`
 
 Testing and validation tool.
 
 **Usage:**
 ```bash
-python test_conversational_snn.py [OPTIONS]
+python tests/test_conversational_snn.py --model_name distilgpt2 [OPTIONS]
 ```
 
 **Options:**
@@ -261,8 +266,8 @@ python test_conversational_snn.py [OPTIONS]
 ### Model Parameters
 
 **Supported Models:**
-- `distilgpt2`: DistilGPT-2 (117M parameters)
-- `SmolLM2-1.7B-Instruct`: SmolLM2 1.7B Instruct (1.7B parameters)
+- `distilgpt2`: DistilGPT-2 (82M parameters)
+- `HuggingFaceTB/SmolLM2-1.7B-Instruct`: SmolLM2 1.7B Instruct (1.7B parameters)
 
 **Conversion Parameters:**
 - `timesteps`: 8-64 (recommended: 16)

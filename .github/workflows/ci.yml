@@ -29,66 +29,49 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
     
-    - name: Install basic dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install transformers numpy
+        # Install torch AND torchvision together from the CPU index so their versions
+        # match. spikingjelly depends on torchvision; if pip resolves torchvision on its
+        # own it may pull a build compiled against a different torch, causing
+        # "operator torchvision::nms does not exist" when transformers imports it.
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        pip install "transformers>=4.30,<4.48" "numpy<2.0" packaging pytest spikingjelly tqdm
       continue-on-error: false
-    
+
     - name: Install optional dependencies
       run: |
         pip install -r requirements.txt || echo "⚠ Some requirements failed to install"
         pip install flake8 || echo "⚠ flake8 install failed"
       continue-on-error: true
-    
-    - name: Basic syntax check (core modules)
+
+    - name: Syntax check (compile every Python file)
       run: |
-        python -m py_compile smollm2_converter.py || exit 1
-        python -m py_compile loihi_constraints.py || exit 1
-        python -m py_compile scripts/run_conversion.py || exit 1
-        python -c "print('✓ Core files syntax check passed')"
-    
-    - name: Test core imports (without SpikingJelly)
+        python -m compileall -q smollm2_converter.py convert.py loihi_constraints.py spikingjelly_compat.py scripts stac_v1 tests
+        python -c "print('✓ py_compile passed for all .py files')"
+
+    - name: Test core imports (top-level modules)
       run: |
         python -c "import torch; print('✓ PyTorch import successful')"
         python -c "import transformers; print('✓ Transformers import successful')"
         python -c "import numpy; print('✓ NumPy import successful')"
+        python -c "import spikingjelly; print('✓ SpikingJelly import successful')"
         echo "✓ Core dependencies importable"
       continue-on-error: false
-    
-    - name: Test basic functionality
+
+    - name: Hard import-check of the five core modules
       run: |
-        python -c "
-        import sys
-        try:
-            import torch
-            from transformers import AutoTokenizer
-            print('✓ Basic ML stack working')
-            sys.exit(0)
-        except Exception as e:
-            print(f'✗ Basic test failed: {e}')
-            sys.exit(1)
-        "
+        python -c "import spikingjelly_compat; print('✓ spikingjelly_compat')"
+        python -c "import loihi_constraints; print('✓ loihi_constraints')"
+        python -c "import convert; print('✓ convert')"
+        python -c "import smollm2_converter; from smollm2_converter import TemporalSpikeProcessor; print('✓ smollm2_converter')"
+        python -c "import stac_v1; from stac_v1 import DLPFCTransformer; print('✓ stac_v1')"
       continue-on-error: false
-    
-    - name: Test stac_v1 package
+
+    - name: Run STAC V1 unit tests (gating)
       run: |
-        python -m py_compile stac_v1/__init__.py || exit 1
-        python -m py_compile stac_v1/model.py || exit 1
-        python -m py_compile stac_v1/pipeline.py || exit 1
-        python -c "print('✓ stac_v1 package syntax check passed')"
-      continue-on-error: false
-    
-    - name: Optional advanced tests
-      run: |
-        python -m py_compile tests/test_conversational_snn.py || echo "⚠ test_conversational_snn.py syntax check failed"
-        python -m py_compile tests/test_v1.py || echo "⚠ test_v1.py syntax check failed"
-        python -c "import smollm2_converter; print('✓ smollm2_converter import successful')" || echo "⚠ smollm2_converter import failed"
-        python -c "from smollm2_converter import TemporalSpikeProcessor; print('✓ TemporalSpikeProcessor import successful')" || echo "⚠ TemporalSpikeProcessor import failed"
-        python -c "import loihi_constraints; print('✓ loihi_constraints import successful')" || echo "⚠ loihi_constraints import failed"
-        echo "✓ Advanced tests completed (failures allowed)"
-      continue-on-error: true
+        python tests/test_v1.py
     
   documentation:
     runs-on: ubuntu-latest

@@ -14,7 +14,7 @@ import torch
 
 try:
     SJ_VERSION = importlib.metadata.version("spikingjelly")
-except:
+except Exception:
     SJ_VERSION = "0.0.0.0.14"
 
 def get_neuron():
@@ -22,7 +22,9 @@ def get_neuron():
     return LIFNode
 
 def get_converter():
-    if SJ_VERSION >= "0.0.0.0.14":
+    # Use a proper version comparison; string comparison is lexicographic and
+    # would order e.g. "0.0.0.0.9" after "0.0.0.0.14".
+    if parse(SJ_VERSION) >= parse("0.0.0.0.14"):
         try:
             from spikingjelly.activation_based.conversion import Converter
             return Converter
@@ -47,7 +49,14 @@ class Quantizer:
     def _quantize_model(self, model):
         # Import quantize module inside the method to avoid circular imports
         from spikingjelly.activation_based import quantize
-        
+
+        if not hasattr(quantize, "k_bit_quantize"):
+            raise RuntimeError(
+                "spikingjelly.activation_based.quantize.k_bit_quantize is not available in the "
+                f"installed SpikingJelly version ({SJ_VERSION}). Cannot apply k-bit quantization. "
+                "Upgrade SpikingJelly (pip install spikingjelly -U --pre) or run without quantization."
+            )
+
         # Apply quantization to model parameters
         for name, param in model.named_parameters():
             if param.requires_grad:

@@ -13,10 +13,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
+
+# Allow running this file directly (python scripts/train_snn_adapter.py).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 import torch.nn.functional as F
@@ -103,7 +107,10 @@ def main() -> int:
     except Exception as e:
         raise RuntimeError("peft is required for this training loop. Install requirements.txt.") from e
 
-    # Target common projection modules. This will catch Linear inside SpikeAttention and MLP.
+    # Target common projection modules. After conversion, SpikeAttention exposes
+    # q_proj/k_proj/v_proj/o_proj (nn.Linear), and the GPT-2 MLP keeps its Conv1D
+    # c_fc/c_proj — PEFT handles both nn.Linear and Conv1D targets. Names not present in
+    # a given backbone are simply ignored by PEFT.
     lora_cfg = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=8,
@@ -128,7 +135,13 @@ def main() -> int:
                 for p in m.parameters():
                     p.requires_grad = True
 
-    opt = AdamW(student.parameters(), lr=args.lr)
+    # Only optimize parameters that actually require grad (LoRA adapter params, the
+    # wrapper logit_scale, and optionally SpikeLayerNorm affine params). Passing frozen
+    # params to AdamW wastes memory/state and can mask configuration mistakes.
+    trainable_params = [p for p in student.parameters() if p.requires_grad]
+    if not trainable_params:
+        raise RuntimeError("No trainable parameters found on the student model.")
+    opt = AdamW(trainable_params, lr=args.lr)
 
     prompts = _default_prompts()
     # Simple cyclic batching
@@ -169,8 +182,12 @@ def main() -> int:
             )
         elif args.loss_type == "kl_ce":
             T = float(args.temperature)
-            t_probs = F.softmax((t_logits_use.float() / T), dim=-1)
-            s_logp = F.log_softmax((s_logits_use.float() / T), dim=-1)
+            V = s_logits_use.size(-1)
+            # Flatten [B, S, V] -> [B*S, V] so 'batchmean' averages over all token
+            # positions. Without flattening, batchmean divides only by B and inflates
+            # the KL by a factor of S.
+            t_probs = F.softmax((t_logits_use.float().reshape(-1, V) / T), dim=-1)
+            s_logp = F.log_softmax((s_logits_use.float().reshape(-1, V) / T), dim=-1)
             kl = F.kl_div(s_logp, t_probs, reduction="batchmean") * (T * T)
             labels = torch.argmax(t_logits_use.detach(), dim=-1)
             ce = F.cross_entropy(
@@ -179,15 +196,18 @@ def main() -> int:
             )
             loss = 0.5 * kl + 0.5 * ce
         else:
-            # KL between softmax distributions (teacher as target), with temperature
+            # KL between softmax distributions (teacher as target), with temperature.
+            # Flatten [B, S, V] -> [B*S, V] so 'batchmean' averages over all token
+            # positions (otherwise the KL is inflated by a factor of S).
             T = float(args.temperature)
-            t_probs = F.softmax((t_logits_use.float() / T), dim=-1)
-            s_logp = F.log_softmax((s_logits_use.float() / T), dim=-1)
+            V = s_logits_use.size(-1)
+            t_probs = F.softmax((t_logits_use.float().reshape(-1, V) / T), dim=-1)
+            s_logp = F.log_softmax((s_logits_use.float().reshape(-1, V) / T), dim=-1)
             loss = F.kl_div(s_logp, t_probs, reduction="batchmean") * (T * T)
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(student.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
         opt.step()
 
         losses.append(float(loss.item()))

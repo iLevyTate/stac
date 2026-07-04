@@ -27,13 +27,13 @@ STAC (Spiking Transformer Augmenting Cognition) is a research framework that exp
 pip install -r requirements.txt
 
 # 2. Convert DistilGPT-2 to an SNN
-python run_conversion.py --model_name distilgpt2 --timesteps 8 --simplified
+python scripts/run_conversion.py --model_name distilgpt2 --timesteps 8 --simplified
 
 # 3. Run a multi-turn conversation smoke test
-python snn_multi_turn_conversation_test.py --mode snn --turns 3 --timesteps 8
+python tests/snn_multi_turn_conversation_test.py --mode snn --turns 3 --timesteps 8
 
 # 4. Run the comprehensive validation suite
-python test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps 8
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps 8
 ```
 
 ## Core Components
@@ -44,18 +44,18 @@ python test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps
 |-----------|---------|
 | `smollm2_converter.py` | Specialized converter with `TemporalSpikeProcessor`. |
 | `convert.py` | Generic ANN-to-SNN conversion pipeline. |
-| `run_conversion.py` | Main CLI entry point for conversions. |
+| `scripts/run_conversion.py` | Main CLI entry point for conversions. |
 | `spikingjelly_compat.py` | Cross-version compatibility layer for SpikingJelly. |
-| `test_conversational_snn.py` | Comprehensive test suite. |
-| `snn_multi_turn_conversation_test.py` | Lightweight multi-turn smoke test. |
+| `tests/test_conversational_snn.py` | Comprehensive test suite. |
+| `tests/snn_multi_turn_conversation_test.py` | Lightweight multi-turn smoke test. |
 
 ### STAC V1
 
 | Component | Purpose |
 |-----------|---------|
-| `stac-v1/stacv1.ipynb` | End-to-end training pipeline with learnable AdEx neurons. |
-| `stac-v1/README.md` | V1 documentation and research notes. |
-| `stac_v1/` + `run_stac_v1.py` | Repo-native runnable V1 pipeline demonstrating hybrid fine-tuning (frozen GPT-2 with a trained spiking and memory head). |
+| `stac_v1/` | Runnable, importable V1 implementation (AdEx neurons, DLPFC layer, HEMM). |
+| `scripts/run_stac_v1.py` | CLI for the repo-native V1 hybrid fine-tuning pipeline (frozen GPT-2 with a trained spiking and memory head). |
+| `stac_v1/README.md` | V1 documentation and research notes. |
 
 ## Implementation Status
 
@@ -90,8 +90,8 @@ python test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps
 - [Hardware Requirements](docs/hardware_requirements.md): system specifications.
 
 ### STAC V1
-- [STAC V1 Documentation](stac-v1/README.md): end-to-end training pipeline documentation.
-- [STAC V1 Implementation](stac-v1/stacv1.ipynb): Jupyter notebook with learnable AdEx neurons.
+- [STAC V1 Documentation](stac_v1/README.md): end-to-end training pipeline documentation.
+- Run it with `python scripts/run_stac_v1.py --model_name sshleifer/tiny-gpt2 --steps 3`.
 
 ## Testing and Validation
 
@@ -99,13 +99,13 @@ The repository includes extensive testing for multi-turn conversational correctn
 
 ```bash
 # Test specific components
-python test_conversational_snn.py --model_name distilgpt2 --test_position_boundaries
-python test_conversational_snn.py --model_name distilgpt2 --test_attention_mask
-python test_conversational_snn.py --model_name distilgpt2 --test_multi_turn
-python test_conversational_snn.py --model_name distilgpt2 --test_energy
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_position_boundaries
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_attention_mask
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_multi_turn
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_energy
 
 # Run the full suite
-python test_conversational_snn.py --model_name distilgpt2 --test_all
+python tests/test_conversational_snn.py --model_name distilgpt2 --test_all
 ```
 
 ## License

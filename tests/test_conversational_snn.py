@@ -14,6 +14,10 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+
+# Allow running this file directly by putting the repo root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from smollm2_converter import (
     replace_gelu_with_relu,
@@ -1003,31 +1007,33 @@ def test_energy_consumption(model, tokenizer, args):
         logger.info(f"  SNN time: {snn_time:.2f} ms")
         logger.info(f"  Target: < {efficiency_target:.2f} ms")
         logger.info(f"  Efficiency ratio: {efficiency_ratio:.2f}x")
-    
-    if is_better:
-        logger.info(f"  PASS: SNN is {efficiency_ratio:.2f}x faster than ANN (exceeds target of {reduction_factor:.1f}x)")
-    else:
-        logger.error(f"  FAIL: SNN is only {efficiency_ratio:.2f}x faster than ANN (below target of {reduction_factor:.1f}x)")
-        all_passed = False
-        
-        # Compare memory usage if available
+
+        # Evaluate the timing target per sequence length (this block must live inside the
+        # loop; previously it sat outside and only judged the final length).
+        if is_better:
+            logger.info(f"  PASS: SNN is {efficiency_ratio:.2f}x faster than ANN (exceeds target of {reduction_factor:.1f}x)")
+        else:
+            logger.error(f"  FAIL: SNN is only {efficiency_ratio:.2f}x faster than ANN (below target of {reduction_factor:.1f}x)")
+            all_passed = False
+
+        # Compare memory usage if available (reported for every length, not only on a timing FAIL).
         if device == 'cuda' and 'memory_mb' in ann_metrics[length] and 'memory_mb' in snn_metrics[length]:
             ann_memory = ann_metrics[length]['memory_mb']
             snn_memory = snn_metrics[length]['memory_mb']
             memory_reduction = (ann_memory - snn_memory) / ann_memory * 100 if ann_memory > 0 else 0
-            
+
             logger.info(f"  Memory usage:")
             logger.info(f"    ANN: {ann_memory:.2f} MB")
             logger.info(f"    SNN: {snn_memory:.2f} MB")
             logger.info(f"    Reduction: {memory_reduction:.1f}%")
-            
+
             # Memory efficiency target (SNN should use at least 20% less memory)
             memory_target = 20.0
             if memory_reduction >= memory_target:
                 logger.info(f"    PASS: SNN uses {memory_reduction:.1f}% less memory (exceeds target of {memory_target:.1f}%)")
             else:
                 logger.warning(f"    NOTICE: SNN uses only {memory_reduction:.1f}% less memory (below target of {memory_target:.1f}%)")
-    
+
     # Save detailed metrics to file
     if args.output_dir:
         metrics_path = os.path.join(args.output_dir, "energy_metrics.json")
@@ -1485,10 +1491,13 @@ def main():
             logger.info(f"Saving SNN model to {args.output_dir}")
             save_snn_model(snn_model, tokenizer, args.output_dir)
             logger.info(f"SNN model saved to {args.output_dir}")
-        
-        logger.info("All tests completed successfully!")
-        return 0
-        
+
+        if success:
+            logger.info("All tests completed successfully!")
+            return 0
+        logger.error("One or more tests failed.")
+        return 1
+
     except Exception as e:
         logger.error(f"Error during conversation test: {e}")
         import traceback

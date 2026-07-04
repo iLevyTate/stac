@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -43,7 +43,7 @@ class STACV1Config:
     output_dir: str = "stac_v1_output"
 
     # Neuron params
-    adex_params: AdExParams = AdExParams()
+    adex_params: AdExParams = field(default_factory=AdExParams)
 
 
 def set_seed(seed_value: int) -> None:
@@ -137,8 +137,9 @@ def _atomic_write_json(path: Path, data: Dict) -> None:
     os.replace(tmp, path)
 
 
-@torch.no_grad()
 def _perplexity(xent_loss: float) -> float:
+    # Pure scalar/numpy math on a Python float; no autograd involved, so no need for
+    # a torch.no_grad() context here.
     try:
         return float(np.exp(xent_loss))
     except Exception:
@@ -259,7 +260,7 @@ def train_steps(
         num_warmup_steps=int(cfg.warmup_steps),
         num_training_steps=max(1, int(max_steps)),
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
     steps = 0
     loss_sum = 0.0
@@ -279,8 +280,13 @@ def train_steps(
         optimizer.zero_grad(set_to_none=True)
         logits, spk_trains = model(input_ids, attention_mask=attention_mask)
 
+        # Mask padded positions to -100 so the loss ignores them. Without this the model
+        # is trained to predict the eos padding tokens, which dominates short sequences.
+        labels = input_ids.clone()
+        labels[attention_mask == 0] = -100
+
         shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = input_ids[..., 1:].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
         loss_xent = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         loss_l1 = float(cfg.l1_lambda) * torch.mean(torch.abs(spk_trains))
         loss = loss_xent + loss_l1

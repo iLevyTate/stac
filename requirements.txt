@@ -1,43 +1,39 @@
 # Core PyTorch and ML Framework
-# NOTE: Python 3.13 wheels are available for torch>=2.6.0. If you are on Python<=3.12,
-# torch 2.0–2.5 may be appropriate; keep this in sync with your Python runtime.
-torch>=2.6.0,<3.0.0
-transformers>=4.30.0,<4.50.0
+# torch 2.2–2.x are supported. Pick a build matching your Python/CUDA runtime
+# (see docs/hardware_requirements.md for CPU/CUDA install commands).
+torch>=2.2.0,<3.0.0
+# transformers is capped below 4.48: 4.48 changed internal attention return
+# contracts that the SpikeAttention replacement in this repo relies on.
+transformers>=4.30.0,<4.48.0
 numpy>=1.24.0,<2.0.0
+packaging>=21.0
 
 # Spiking Neural Networks
 spikingjelly>=0.0.0.0.14
 # Note: Use pre-release for latest features: pip install spikingjelly[cuda] -U --pre
 
-# Efficient Training and Quantization
+# Efficient Training and Quantization (optional; used by the quantized conversion paths)
 bitsandbytes>=0.39.0,<0.45.0
 accelerate>=0.20.0,<0.35.0
-
-# Machine Learning Utilities
-scikit-learn>=1.2.0,<1.6.0
 
 # Parameter-efficient finetuning (LoRA adapters for distillation)
 peft>=0.12.0,<0.17.0
 
-# Progress Monitoring and Visualization
+# Progress Monitoring
 tqdm>=4.65.0
-matplotlib>=3.7.0,<3.10.0
 
-# System Monitoring for Energy Profiling
-psutil>=5.9.0
+# Testing
+pytest>=7.0.0
+
+# Optional utilities — not imported by the current code paths. Uncomment if you need them:
+# scikit-learn>=1.2.0,<1.6.0   # extra ML utilities
+# matplotlib>=3.7.0,<3.10.0    # plotting
+# psutil>=5.9.0                # host-level resource monitoring
 
 # Development Dependencies (Optional)
 # Uncomment for development work:
-# pytest>=7.0.0
 # black>=23.0.0
 # flake8>=6.0.0
 # mypy>=1.0.0
 
-# CUDA-Specific Installation Instructions:
-# For CUDA 11.8: pip install torch==2.3.0+cu118 -f https://download.pytorch.org/whl/torch_stable.html
-# For CUDA 12.1: pip install torch==2.3.0+cu121 -f https://download.pytorch.org/whl/torch_stable.html
-# For CPU only: pip install torch==2.3.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
-
-# Minimum Python Version: 3.8
-# Tested with Python 3.8, 3.9, 3.10, 3.11
-# Recommended: Python 3.10 for best compatibility 
+# Recommended Python: 3.9–3.11 (CI is tested on 3.9, 3.10, 3.11).

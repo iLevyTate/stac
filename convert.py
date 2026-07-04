@@ -15,19 +15,22 @@ import spikingjelly  # type: ignore
 from packaging.version import parse
 import importlib.metadata
 import logging
+import sys
 from typing import Dict, Any, List, Tuple, Optional, Union
 import os
 from tqdm import tqdm
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('conversion.log')
-    ]
-)
+# Configure logging (only if the root logger has no handlers yet, so importing this
+# module doesn't clobber a caller's logging config or add duplicate file handlers).
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('conversion.log')
+        ]
+    )
 logger = logging.getLogger("generic_converter")
 
 # Check SpikingJelly version
@@ -139,10 +142,25 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
     
     # Step 1: Replace GeLU with ReLU in-place (SNN-friendly activation)
     logger.info("Replacing GeLU with ReLU...")
-    for mod in model.modules():
-        if mod.__class__.__name__ == "GELU":
-            mod.__class__ = torch.nn.ReLU
-            logger.info("Replaced GELU with ReLU")
+    for name, mod in list(model.named_modules()):
+        if mod.__class__.__name__ not in ("GELU", "GELUActivation", "NewGELUActivation"):
+            continue
+        # Swap the activation out on its parent. Reassigning `mod.__class__` in place
+        # produced an nn.ReLU instance lacking the `inplace` attribute, which raises
+        # AttributeError on the next forward.
+        path = name.split('.')
+        child_name = path[-1]
+        parent_path = '.'.join(path[:-1])
+        if parent_path:
+            parent = model
+            for attr in parent_path.split('.'):
+                parent = getattr(parent, attr)
+            setattr(parent, child_name, torch.nn.ReLU())
+        elif child_name:
+            setattr(model, child_name, torch.nn.ReLU())
+        else:
+            continue
+        logger.info("Replaced GELU with ReLU")
 
     # Step 2: Insert quantizers for 8-bit precision
     logger.info("Inserting 8-bit quantizers...")
@@ -243,10 +261,25 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
     
     # 1. Replace GELU with ReLU (SNN friendly)
     logger.info("Replacing GeLU with ReLU...")
-    for mod in model.modules():
-        if mod.__class__.__name__ == "GELU":
-            mod.__class__ = torch.nn.ReLU
-            logger.info("Replaced GELU with ReLU")
+    for name, mod in list(model.named_modules()):
+        if mod.__class__.__name__ not in ("GELU", "GELUActivation", "NewGELUActivation"):
+            continue
+        # Swap the activation out on its parent. Reassigning `mod.__class__` in place
+        # produced an nn.ReLU instance lacking the `inplace` attribute, which raises
+        # AttributeError on the next forward.
+        path = name.split('.')
+        child_name = path[-1]
+        parent_path = '.'.join(path[:-1])
+        if parent_path:
+            parent = model
+            for attr in parent_path.split('.'):
+                parent = getattr(parent, attr)
+            setattr(parent, child_name, torch.nn.ReLU())
+        elif child_name:
+            setattr(model, child_name, torch.nn.ReLU())
+        else:
+            continue
+        logger.info("Replaced GELU with ReLU")
     
     # 2. Add SNN-specific attributes
     setattr(model, 'T', timesteps)  # Store timesteps in the model
@@ -263,12 +296,8 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
         # Sample typical activation bound
         activation_bound = 1.0  # Default assumption
         for name, module in model.named_modules():
-            if isinstance(module, torch.nn.ReLU) and hasattr(module, 'threshold'):
-                # Apply exact threshold matching formula
-                module.threshold = module.threshold * (T_target / T_original)
-                logger.debug(f"Adjusted threshold for {name}: {module.threshold:.4f}")
-            
-            # For models without explicit thresholds, annotate with metadata
+            # For models without explicit thresholds, annotate with metadata.
+            # (nn.ReLU has no `threshold` attribute, so there is nothing to scale here.)
             if isinstance(module, torch.nn.ReLU):
                 # Add threshold attribute for when it gets converted to spiking
                 module.register_buffer(
@@ -303,20 +332,31 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
     logger.info("Applied simplified SNN conversion")
     return model
 
-def save_snn_model(model: torch.nn.Module, path: str) -> bool:
+def save_snn_model(model: torch.nn.Module, path: str, timesteps: Optional[int] = None, simplified: bool = True) -> bool:
     """
     Save the SNN model in a way that's easier to load later.
     Instead of saving the entire model object, we save the state_dict and metadata separately.
+
+    Args:
+        model: The (converted) model to save.
+        path: Destination file path.
+        timesteps: Timestep count to record. Falls back to model.T, then 16.
+        simplified: Whether the model was produced by the simplified conversion path.
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
+    # Guard against a bare filename (dirname == "") which would make os.makedirs fail.
+    out_dir = os.path.dirname(path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    T_value = timesteps if timesteps is not None else getattr(model, 'T', 16)
+
     # Create a dictionary with metadata and state dict
     snn_data = {
         "state_dict": model.state_dict(),
         "config": getattr(model, 'config', None),
         "model_type": type(model).__name__,
-        "T": getattr(model, 'T', 16),
-        "simplified": True
+        "T": T_value,
+        "simplified": bool(simplified)
     }
     
     # Save the data
@@ -392,7 +432,7 @@ def main() -> int:
         logger.info(f"Saving converted SNN model to {args.output_dir}")
         
         # Save SNN model
-        save_snn_model(snn_model, f"{args.output_dir}/snn_model.pt")
+        save_snn_model(snn_model, f"{args.output_dir}/snn_model.pt", timesteps=args.timesteps, simplified=args.simplified)
         tokenizer.save_pretrained(args.output_dir)
         
         # Also save model config for reference
@@ -419,4 +459,4 @@ def main() -> int:
         return 1
 
 if __name__ == "__main__":
-    exit(main()) 
+    sys.exit(main()) 
