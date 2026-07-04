@@ -1,13 +1,15 @@
-import sys, subprocess, math, textwrap, re
 from pathlib import Path
 
 try:
     import pypdf
-except ImportError:
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'pypdf', '-q'])
-    import pypdf
+except ImportError as e:
+    raise SystemExit(
+        "pypdf is required to run this helper. Install it with `pip install pypdf`."
+    ) from e
 
-pdf_path = Path('docs/Aligned Minds Efficient Machines Publication 3.pdf')
+# Resolve the PDF relative to the repo root so this works regardless of CWD.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+pdf_path = REPO_ROOT / 'docs' / 'Aligned Minds Efficient Machines Publication 3.pdf'
 reader = pypdf.PdfReader(str(pdf_path))
 text = '\n'.join((page.extract_text() or '') for page in reader.pages)
 keywords = ['STAC','Spiking','Loihi','neuromorphic','SNN','ANN-to-SNN','conversion','energy','V1','V2']

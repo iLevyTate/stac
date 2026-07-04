@@ -7,44 +7,35 @@ NOTE: This CLI wrapper is experimental; see README for current limitations.
 """
 import argparse
 import os
+import sys
+from pathlib import Path
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import spikingjelly
-from packaging.version import parse
-import importlib.metadata
 import logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('conversion_pipeline.log')
-    ]
-)
-logger = logging.getLogger("conversion_pipeline")
-
-# Direct SpikingJelly imports
-from spikingjelly_compat import get_quantizer
-Quantizer = get_quantizer()
-from spikingjelly.activation_based.conversion import Converter
-# SpikeAttention might be from layer or ann2snn depending on SJ version and what's used.
-# Assuming 'layer' for now based on previous updates for consistency.
-from spikingjelly.activation_based.layer import SpikeAttention
-from spikingjelly.activation_based import surrogate
-
 import subprocess
 import time
 import json
 
-min_version = '0.0.0.0.14'
-current_version = importlib.metadata.version('spikingjelly')
-if parse(current_version) < parse(min_version):
-    raise ImportError(
-        f'SpikingJelly version {current_version} is older than required version {min_version}. '
-        f'Please upgrade SpikingJelly: pip install "spikingjelly[cuda]>=0.0.0.0.14" --pre'
+# Allow running this file directly (python scripts/run_conversion.py) and locating the
+# repo-root scripts it drives (convert.py, tests/...).
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+# Configure logging
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('conversion_pipeline.log')
+        ]
     )
+logger = logging.getLogger("conversion_pipeline")
+
+# NOTE: This runner only orchestrates the conversion/test scripts as subprocesses; it does
+# not import SpikingJelly directly. The previous SpikingJelly imports (including a
+# non-existent `spikingjelly.activation_based.layer.SpikeAttention`) crashed even
+# `--help`, so they have been removed. The subprocesses perform their own version checks.
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run SNN conversion pipeline')
@@ -75,11 +66,18 @@ def parse_args():
                       help='Use simplified conversion approach without relying on complex SpikingJelly features')
     return parser.parse_args()
 
-def run_component_tests():
+def run_component_tests(model_name="distilgpt2"):
     """Run basic functionality tests to ensure all components work."""
     logger.info("=== Running Component Tests ===")
-    cmd = ["python", "test_conversational_snn.py", "--test_all"]
-    
+    # Anchor to the repo root and use the current interpreter; test_conversational_snn.py
+    # lives under tests/ and requires --model_name.
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "tests" / "test_conversational_snn.py"),
+        "--model_name", model_name,
+        "--test_all",
+    ]
+
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True)
     duration = time.time() - start_time
@@ -97,10 +95,12 @@ def run_conversion(args):
     """Run the main conversion process."""
     logger.info(f"\n=== Converting Model: {args.model_name} ===")
     
-    # Construct command for convert.py with simplified flag
+    # Construct command for convert.py with simplified flag. Anchor to the repo root and
+    # use the current interpreter so the runner works from any CWD / virtualenv.
+    convert_py = str(REPO_ROOT / "convert.py")
     if args.simplified:
         cmd = [
-            "python", "convert.py",
+            sys.executable, convert_py,
             "--model_name", args.model_name,
             "--output_dir", args.output_dir,
             "--timesteps", str(args.timesteps),
@@ -109,7 +109,7 @@ def run_conversion(args):
     else:
         # Try normal conversion first
         cmd = [
-            "python", "convert.py",
+            sys.executable, convert_py,
             "--model_name", args.model_name,
             "--output_dir", args.output_dir,
             "--timesteps", str(args.timesteps)
@@ -344,21 +344,20 @@ def main():
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Step 1: Check SpikingJelly compatibility
+    # Step 1: Check SpikingJelly compatibility with an in-process import probe.
+    # (Previously this shelled out to a non-existent test_direct_import.py.)
     logger.info("\n=== Checking SpikingJelly Compatibility ===")
-    compat_cmd = ["python", "test_direct_import.py"]
-    compat_result = subprocess.run(compat_cmd, capture_output=True, text=True)
-    logger.info(compat_result.stdout)
-    
-    # Determine if we need to use simplified approach
     use_simplified = False
-    if "missing components" in compat_result.stdout:
-        logger.info("SpikingJelly compatibility issues detected - will use simplified approach")
+    try:
+        from spikingjelly.activation_based.ann2snn import Converter  # noqa: F401
+        logger.info("✓ SpikingJelly ann2snn.Converter is importable")
+    except Exception as e:
+        logger.warning(f"SpikingJelly components missing or unimportable ({e}); will use simplified approach")
         use_simplified = True
-    
+
     # Step 2: Run component tests if requested
     if args.run_component_tests:
-        component_tests_passed = run_component_tests()
+        component_tests_passed = run_component_tests(args.model_name)
         if not component_tests_passed:
             logger.error("Component tests failed. Fix the issues before proceeding with conversion.")
             return 1
@@ -381,27 +380,53 @@ def main():
         logger.error("Model tests failed. The converted model may not be working correctly.")
         return 1
     
+    # Warn about flags that are accepted for CLI compatibility but not yet wired up.
+    unapplied = [
+        name for name, val in (
+            ("--use_sparse", args.use_sparse),
+            ("--use_delayed_spikes", args.use_delayed_spikes),
+            ("--use_function_calling", args.use_function_calling),
+        ) if val
+    ]
+    if args.surrogate_function and args.surrogate_function != "stbif_plus":
+        unapplied.append(f"--surrogate_function={args.surrogate_function}")
+    if unapplied:
+        logger.warning(
+            "The following flags are recognized but not applied by this runner "
+            f"(no-op): {', '.join(unapplied)}"
+        )
+
     # Step 5: Export to TorchScript if requested
     if args.optimize_for_torchscript:
         logger.info("\n=== Exporting to TorchScript ===")
         try:
             # Load model again for export
             model_path = os.path.join(args.output_dir, "snn_model.pt")
-            model = torch.load(model_path, map_location='cpu')
-            
-            # Export model
-            ts_path = os.path.join(args.output_dir, "snn_model.pt.ts")
-            export_torchscript(model, ts_path)
-            
-            # Verify the exported model
-            if args.verify and os.path.exists(ts_path):
-                logger.info(f"Successfully created TorchScript model: {ts_path}")
-                logger.info(f"Model size: {os.path.getsize(ts_path) / (1024 * 1024):.2f} MB")
+            model = torch.load(model_path, map_location='cpu', weights_only=False)
+
+            # The converter saves a metadata dict ({"state_dict": ..., ...}), not a live
+            # nn.Module. torch.jit.script/.eval() on a dict can never succeed, so skip
+            # honestly instead of raising deep inside the exporter.
+            if isinstance(model, dict):
+                logger.warning(
+                    "Saved model is a state-dict/metadata dictionary, not a scriptable "
+                    "nn.Module; skipping TorchScript export. Rebuild and script a live "
+                    "model object to enable this step."
+                )
+            else:
+                # Export model
+                ts_path = os.path.join(args.output_dir, "snn_model.pt.ts")
+                export_torchscript(model, ts_path)
+
+                # Verify the exported model
+                if args.verify and os.path.exists(ts_path):
+                    logger.info(f"Successfully created TorchScript model: {ts_path}")
+                    logger.info(f"Model size: {os.path.getsize(ts_path) / (1024 * 1024):.2f} MB")
         except Exception as e:
             logger.error(f"Error during TorchScript export: {e}")
             import traceback
             traceback.print_exc()
-    
+
     logger.info("\n=== Pipeline Summary ===")
     logger.info("✓ All steps completed successfully")
     if use_simplified:
@@ -430,5 +455,4 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    exit_code = main()
-    exit(exit_code) 
+    sys.exit(main()) 
