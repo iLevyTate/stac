@@ -26,18 +26,24 @@ Outputs:
 import argparse
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 
-import numpy as np
+# Allow running this file directly by putting the repo root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import torch
-import spikingjelly.activation_based.functional as functional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 try:
-    # Import spiking utilities if available
+    # Import spiking utilities if available. spikingjelly is a hard dependency of the
+    # SNN path, so import it here too and fall back to the baseline transformer if it
+    # (or the converter) is unavailable.
+    import spikingjelly.activation_based.functional as functional
     from smollm2_converter import simplified_conversion, TemporalSpikeProcessor
 except ImportError:
+    functional = None
     simplified_conversion = None
     TemporalSpikeProcessor = None
 
@@ -58,8 +64,12 @@ def build_model(timesteps: int, device: torch.device, mode: str):
         raise RuntimeError("Spiking conversion utilities not available; install/compile them or choose --mode baseline.")
 
     logger.info(f"Converting to SNN (T={timesteps})…")
-    snn = simplified_conversion(base, timesteps=timesteps)
-    tp = TemporalSpikeProcessor(snn, T=timesteps).to(device)
+    # simplified_conversion already returns a TemporalSpikeProcessor; wrapping it again
+    # would nest the timestep loop (T x T) and double the logit scaling.
+    tp = simplified_conversion(base, timesteps=timesteps)
+    if not isinstance(tp, TemporalSpikeProcessor):
+        tp = TemporalSpikeProcessor(tp, T=timesteps)
+    tp = tp.to(device)
     tp.eval()
     return tp
 

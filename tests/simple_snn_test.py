@@ -6,6 +6,11 @@ import os
 import torch
 import logging
 import sys
+from pathlib import Path
+
+# Allow running this file directly by putting the repo root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from smollm2_converter import replace_gelu_with_relu, simplified_conversion
 

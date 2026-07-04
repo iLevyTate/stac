@@ -1,5 +1,10 @@
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+# Allow running this file directly (python tests/test_v1.py) by putting the repo root on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 import torch.nn as nn
@@ -275,7 +280,12 @@ def run_all_tests():
         print("All tests passed successfully!")
     else:
         print("Some tests failed. Please review the errors above.")
+    return tests_failed
+
 
 # --- Execute Tests ---
-run_all_tests()
+# When run as a script, run the whole suite and set the exit code from the failure count.
+# Under pytest, the individual `test_*` functions above are collected and run directly.
+if __name__ == "__main__":
+    sys.exit(1 if run_all_tests() else 0)
 
