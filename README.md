@@ -20,6 +20,14 @@ STAC (Spiking Transformer Augmenting Cognition) is a research framework that exp
 - Hardware power profiling: planned, not yet implemented.
 - Full operator coverage and optimization: work in progress.
 
+> **Scope note on V2 conversion.** The V2 path currently produces a *structurally*
+> spiking model, not a spiking computation: `SpikeSoftmax` calls `torch.softmax`, and the
+> LIF neurons inside `SpikeAttention` are constructed but deliberately bypassed to
+> preserve generation quality (see the comments in `smollm2_converter.py`). Because the
+> network is stateless, running it for `T` timesteps reproduces the same logits at `T`
+> times the cost. Treat V2 as a conversion *scaffold*; STAC V1 (`stac_v1/`) is the part
+> that actually spikes.
+
 ## Quick Start
 
 ```bash
@@ -62,12 +70,17 @@ python tests/test_conversational_snn.py --model_name distilgpt2 --test_all --tim
 ### STAC V2
 
 **Completed (prototype level)**
-- Core conversion flow: GELU-to-ReLU substitution, quantization, and `ann2snn`.
+- Core conversion flow: GELU-to-ReLU substitution, quantization, and the `ann2snn` call
+  path. Note that SpikingJelly's `ann2snn.Converter` requires a `torch.fx`-traceable
+  model; HuggingFace causal LMs generally are not, so conversion falls back to the
+  simplified path. The fallback is logged and recorded in the saved metadata.
 - Temporal dynamics and KV-cache handling in PyTorch.
-- Spike-count telemetry hooks and accompanying unit tests.
 - Loihi export gating (requires `EXPORT_LOIHI=1` and `lava.lib.dl.slayer`; otherwise the pipeline remains simulation-only and Loihi tests are skipped).
 
 **Pending or in progress**
+- Spike-count telemetry hooks for V2 (STAC V1 reports spike statistics; V2 does not).
+- Real spiking dynamics in V2 (`SpikeSoftmax` / `SpikeAttention` currently bypass their
+  spiking neurons).
 - Hardware benchmarking on Loihi-2 and Akida.
 - Expanded operator support (rotary embeddings, flash-attention variants, etc.).
 - Integration with the SCANUE multi-agent alignment layer.

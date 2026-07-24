@@ -119,27 +119,50 @@ def run_conversion(args):
     cmd.extend(["--num_samples", "3"])  # Small number for quick testing
     
     logger.info(f"Running conversion: {' '.join(cmd)}")
-    
+
+    # A model file left over from an earlier run must not be mistaken for output of
+    # this one, so remember whether it already existed (and when it was last written).
+    model_path = os.path.join(args.output_dir, "snn_model.pt")
+    prior_mtime = os.path.getmtime(model_path) if os.path.exists(model_path) else None
+
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True)
     duration = time.time() - start_time
-    
+
     # Print output
     logger.info(result.stdout)
     if result.stderr:
-        logger.error("Errors in conversion phase:")
-        logger.error(result.stderr)
-    
-    # Check if conversion created a model file
-    model_path = os.path.join(args.output_dir, "snn_model.pt")
-    conversion_success = os.path.exists(model_path)
-    
+        # convert.py logs to stderr, so stderr on its own does not mean failure.
+        # Only the exit code does; anything else produced false alarms on success.
+        if result.returncode != 0:
+            logger.error("Errors in conversion phase:")
+            logger.error(result.stderr)
+        else:
+            logger.info("Conversion subprocess log (stderr):")
+            logger.info(result.stderr)
+
+    # Success requires BOTH a clean exit code and a model file this run produced.
+    # Checking only for the file's existence let a stale artifact from a previous run
+    # make a completely failed conversion report success.
+    fresh_model = os.path.exists(model_path) and (
+        prior_mtime is None or os.path.getmtime(model_path) > prior_mtime
+    )
+    conversion_success = result.returncode == 0 and fresh_model
+
     logger.info(f"Conversion completed in {duration:.2f} seconds")
     if conversion_success:
         logger.info(f"✓ Model file created at {model_path}")
     else:
-        logger.error(f"✗ Model file not created at {model_path}")
-    
+        if result.returncode != 0:
+            logger.error(f"✗ Conversion subprocess exited with code {result.returncode}")
+        if not os.path.exists(model_path):
+            logger.error(f"✗ Model file not created at {model_path}")
+        elif not fresh_model:
+            logger.error(
+                f"✗ {model_path} was not rewritten by this run — it is a stale artifact "
+                "from an earlier conversion"
+            )
+
     return conversion_success
 
 def test_converted_model(output_dir):

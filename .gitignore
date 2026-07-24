@@ -195,6 +195,10 @@ outputs/
 checkpoints/
 models/
 snn_models/
+# Default output dirs of the shipped CLIs (scripts/run_stac_v1.py, scripts/run_conversion.py)
+stac_v1_output/
+snn_converted_model/
+snn_model/
 
 # Log files
 *.log

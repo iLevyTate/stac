@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
+
+# Allow running this file directly (`python scripts/run_stac_v1.py`) by putting the repo
+# root on sys.path. Python puts the *script's* directory on sys.path, not the cwd, so
+# without this `import stac_v1` fails even when invoked from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stac_v1.pipeline import (
     STACV1Config,

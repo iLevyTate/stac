@@ -16,6 +16,7 @@ Specialized script for creating a conversational spiking language model.
 # ---------------------------------------------------------------------------
 """
 import argparse
+import inspect
 import torch
 import torch.nn as nn
 import os
@@ -604,28 +605,91 @@ class TemporalSpikeProcessor(nn.Module):
         self.logit_scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
         # logger.info(f"Created temporal spike processor with T={T}, max_context_length={max_context_length}, device={self.device}")
     
+    def _max_position_embeddings(self):
+        """Positional capacity of the inner model, or None when it has no limit."""
+        config = getattr(self.snn_model, 'config', None)
+        if config is None:
+            return None
+        max_pos = getattr(config, 'max_position_embeddings', None)
+        if max_pos is None:
+            max_pos = getattr(config, 'n_positions', None)
+        return int(max_pos) if max_pos else None
+
+    def _context_limit(self):
+        """
+        Largest context this processor may feed the inner model.
+
+        Bounded by BOTH the configured max_context_length and the model's positional
+        capacity: exceeding the latter makes the position embedding lookup raise
+        `IndexError: index out of range in self`.
+        """
+        limit = int(self.max_context_length)
+        max_pos = self._max_position_embeddings()
+        if max_pos:
+            limit = min(limit, max_pos)
+        return max(1, limit)
+
+    @staticmethod
+    def _cache_length(past_key_values):
+        """Number of cached positions, or 0 when there is no usable cache."""
+        try:
+            return int(past_key_values[0][0].size(-2))
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _trim_cache(past_key_values, keep):
+        """
+        Drop the oldest entries so at most `keep` cached positions remain.
+
+        Trimming from the left keeps the cache aligned with a left-truncated context
+        window and stops `past_length` from growing past the model's position limit.
+        """
+        if keep <= 0:
+            return None
+        trimmed = []
+        for layer in past_key_values:
+            key, value = layer[0], layer[1]
+            trimmed.append((key[..., -keep:, :], value[..., -keep:, :]))
+        return trimmed
+
     def _create_position_ids(self, input_shape, past_length=0):
         """
         HF-style position ID creation with cache support.
         Aligns with HuggingFace's create_position_ids_from_input_ids method.
         """
         batch_size, seq_length = input_shape
-        
+
         # Create position IDs that continue from past_length
         position_ids = torch.arange(
-            past_length, 
-            past_length + seq_length, 
+            past_length,
+            past_length + seq_length,
             dtype=torch.long,
             device=self.device
         ).unsqueeze(0)
-        
+
         # Apply clamping with fallback for models using relative position embeddings
-        max_pos = getattr(self.snn_model.config, 'max_position_embeddings', 32768)
+        max_pos = self._max_position_embeddings() or 32768
         position_ids = position_ids.clamp(0, max_pos-1)
-            
+
         # Expand to match batch size
         return position_ids.expand(batch_size, -1)
-    
+
+    def _accepts_position_ids(self):
+        """Whether the inner model's forward takes an explicit `position_ids` kwarg."""
+        cached = getattr(self, "_position_ids_supported", None)
+        if cached is None:
+            try:
+                params = inspect.signature(self.snn_model.forward).parameters
+                cached = "position_ids" in params or any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+                )
+            except (TypeError, ValueError):
+                cached = False
+            self._position_ids_supported = bool(cached)
+        return self._position_ids_supported
+
+
     def forward(self, input_ids, attention_mask=None, use_cache=True, batch_ids=None, incremental=False, **kwargs):
         """
         Process input through the SNN model using temporal processing with batch support.
@@ -641,6 +705,9 @@ class TemporalSpikeProcessor(nn.Module):
             Tensor with accumulated logits
         """
         batch_size, seq_length = input_ids.shape
+        # Length the caller asked about. `seq_length` is rebound below when the context
+        # is truncated, so keep the original for restoring the output shape at the end.
+        original_seq_length = seq_length
 
         # Optional incremental token cache behavior for multi-turn state retention
         if incremental:
@@ -659,22 +726,26 @@ class TemporalSpikeProcessor(nn.Module):
                     self._token_cache_attention_mask = torch.cat([self._token_cache_attention_mask, add_mask], dim=1)
 
             # Enforce max context length on the cache
-            if self._token_cache_input_ids.size(1) > self.max_context_length:
-                self._token_cache_input_ids = self._token_cache_input_ids[:, -self.max_context_length:]
+            token_cache_limit = self._context_limit()
+            if self._token_cache_input_ids.size(1) > token_cache_limit:
+                self._token_cache_input_ids = self._token_cache_input_ids[:, -token_cache_limit:]
                 if self._token_cache_attention_mask is not None:
-                    self._token_cache_attention_mask = self._token_cache_attention_mask[:, -self.max_context_length:]
+                    self._token_cache_attention_mask = self._token_cache_attention_mask[:, -token_cache_limit:]
 
             # Use cached full context for the actual forward pass
             input_ids = self._token_cache_input_ids
             attention_mask = self._token_cache_attention_mask
             batch_size, seq_length = input_ids.shape
         
-        # Ensure input doesn't exceed max context length
-        if seq_length > self.max_context_length:
-            logger.warning(f"Input sequence length {seq_length} exceeds max context length {self.max_context_length}. Truncating.")
-            input_ids = input_ids[:, -self.max_context_length:]
+        # Ensure input doesn't exceed the usable context. The bound is the smaller of the
+        # configured max_context_length and the model's positional capacity — feeding
+        # positions beyond the latter raises IndexError inside the embedding lookup.
+        context_limit = self._context_limit()
+        if seq_length > context_limit:
+            logger.warning(f"Input sequence length {seq_length} exceeds max context length {context_limit}. Truncating.")
+            input_ids = input_ids[:, -context_limit:]
             if attention_mask is not None:
-                attention_mask = attention_mask[:, -self.max_context_length:]
+                attention_mask = attention_mask[:, -context_limit:]
             batch_size, seq_length = input_ids.shape
         
         # In Loihi mode, avoid HuggingFace KV-cache semantics; rely on token cache / sequential processing instead.
@@ -741,7 +812,25 @@ class TemporalSpikeProcessor(nn.Module):
         else:
             # Standard non-batched processing using global KV cache
             past_key_values = self.kv_cache if use_cache else None
-        
+
+        # Keep the KV cache inside the context window. Truncating input_ids alone left the
+        # cache growing by one position per call forever: it silently exceeded
+        # max_context_length and then crashed with "index out of range in self" once
+        # past_length reached the model's max_position_embeddings. The cache must also stay
+        # a strict prefix of the current input, otherwise the model is fed only its last
+        # token against an unrelated history.
+        if past_key_values is not None:
+            cache_len = self._cache_length(past_key_values)
+            max_cache = min(context_limit - 1, seq_length - 1)
+            if cache_len > max_cache:
+                logger.debug(
+                    f"Trimming KV cache from {cache_len} to {max(max_cache, 0)} entries "
+                    f"(context limit {context_limit}, current input {seq_length})."
+                )
+                past_key_values = self._trim_cache(past_key_values, max_cache)
+                if batch_ids is None:
+                    self.kv_cache = past_key_values
+
         # Reset all neuron states in the model before processing
         functional.reset_net(self.snn_model)
         
@@ -766,22 +855,42 @@ class TemporalSpikeProcessor(nn.Module):
                 and past_key_values[0][0] is not None
             )
             model_input_ids = input_ids  # By default feed full sequence
+            past_length = 0
             if using_kv_cache:
-                # Only feed the NEW tokens to the model to avoid size mismatch
-                past_length = past_key_values[0][0].size(-2)
-                if seq_length > past_length:
-                    model_input_ids = input_ids[:, past_length:]
-                else:
-                    # Fallback: at least feed the last token
-                    model_input_ids = input_ids[:, -1:]
+                # Only feed the NEW tokens to the model to avoid size mismatch. The cache
+                # was trimmed above so it is always a strict prefix of `input_ids`.
+                past_length = min(self._cache_length(past_key_values), max(seq_length - 1, 0))
+                model_input_ids = input_ids[:, past_length:]
             # -----------------------------------------------------------------
 
             # Ensure attention_mask is valid
             if attention_mask is None:
                 attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long, device=input_ids.device)
 
+            # The mask must cover cached + new positions; keep it aligned with the window
+            # actually being attended over.
+            expected_mask_len = past_length + model_input_ids.size(1)
+            if attention_mask.dim() == 2 and attention_mask.size(1) != expected_mask_len:
+                if attention_mask.size(1) > expected_mask_len:
+                    attention_mask = attention_mask[:, -expected_mask_len:]
+                else:
+                    pad = torch.ones(
+                        (attention_mask.size(0), expected_mask_len - attention_mask.size(1)),
+                        dtype=attention_mask.dtype,
+                        device=attention_mask.device,
+                    )
+                    attention_mask = torch.cat([pad, attention_mask], dim=1)
+
             # Add attention mask to kwargs
             model_kwargs["attention_mask"] = attention_mask
+
+            # Pass explicit, clamped position IDs. Without this the inner model derives
+            # them from the cache length alone, with nothing keeping them below
+            # max_position_embeddings (_create_position_ids existed but was never called).
+            if self._accepts_position_ids():
+                model_kwargs["position_ids"] = self._create_position_ids(
+                    (model_input_ids.size(0), model_input_ids.size(1)), past_length=past_length
+                )
 
             # Always pass an explicit use_cache. If we leave it unset the inner HF model
             # falls back to config.use_cache (usually True) and builds its own cache
@@ -851,7 +960,7 @@ class TemporalSpikeProcessor(nn.Module):
             if vocab is None:
                 raise RuntimeError("TemporalSpikeProcessor could not produce logits and vocab_size is unknown.")
             final_logits = torch.zeros(
-                (batch_size, seq_length, vocab),
+                (batch_size, original_seq_length, vocab),
                 device=input_ids.device,
                 dtype=torch.float32,
             )
@@ -861,13 +970,14 @@ class TemporalSpikeProcessor(nn.Module):
         # Apply learnable logit scaling (helps distillation/parity)
         final_logits = final_logits * self.logit_scale.to(dtype=final_logits.dtype)
 
-        # Ensure logits sequence length matches original input_ids length so downstream
-        # tests that compare shapes do not fail, even if internal model shortened due to
-        # context handling.
-        if final_logits.shape[1] != seq_length:
-            if final_logits.shape[1] < seq_length:
+        # Ensure logits sequence length matches the ORIGINAL input_ids length so callers
+        # comparing shapes do not fail, even if the model shortened the sequence via
+        # context truncation or KV-cache reuse. `seq_length` is rebound by truncation, so
+        # comparing against it silently returned a shorter tensor than the caller passed.
+        if final_logits.shape[1] != original_seq_length:
+            if final_logits.shape[1] < original_seq_length:
                 # Left-pad with zeros (model ignored some positions)
-                pad_len = seq_length - final_logits.shape[1]
+                pad_len = original_seq_length - final_logits.shape[1]
                 pad_tensor = torch.zeros(
                     final_logits.size(0), pad_len, final_logits.size(-1),
                     dtype=final_logits.dtype, device=final_logits.device
@@ -958,6 +1068,9 @@ def parse_args():
                         help='Device to use for conversion')
     parser.add_argument('--max_context_length', type=int, default=512,
                         help='Maximum context length for the model')
+    parser.add_argument('--calibrate_timesteps', action='store_true',
+                        help='After conversion, halve T and rescale LIF thresholds accordingly. '
+                             'Off by default so --timesteps is honoured exactly.')
     return parser.parse_args()
 
 def replace_gelu_with_relu(model):
@@ -1759,14 +1872,16 @@ def main():
         logger.warning("No calibration data for SpikingJelly Converter. Some features might not work optimally.")
 
     try:
-        # Converter is the class from direct import
+        # Converter is the class from direct import. Its signature is
+        # (dataloader, device=None, mode='Max', momentum=0.1, fuse_flag=True) — there is
+        # no `spiking_neuron_type` parameter, and passing one raised TypeError before any
+        # conversion happened, so this branch always fell through to the except below.
         converter_instance = Converter(
-            mode='max', 
-            dataloader=sj_calib_dataloader, 
+            dataloader=sj_calib_dataloader,
+            mode='max',
             device=device,
-            spiking_neuron_type='LIFNode', 
         )
-        converted_snn_model = converter_instance(snn_parts_model) 
+        converted_snn_model = converter_instance(snn_parts_model)
         logger.info("Official SpikingJelly Converter applied.")
     except Exception as e:
         logger.error(f"Official SpikingJelly Converter failed: {e}. Using model from simplified_conversion.")
@@ -1787,8 +1902,10 @@ def main():
         final_snn_model = TemporalSpikeProcessor(converted_snn_model, T=args.timesteps, max_context_length=max_context)
     final_snn_model.to(device)
 
-    if args.timesteps > 16: # Example: further calibrate if initial T is large
-        target_T = args.timesteps // 2
+    # Timestep calibration halves T, so leaving it on by default meant `--timesteps 32`
+    # silently produced a model running at T=16. It is now opt-in.
+    if getattr(args, 'calibrate_timesteps', False) and args.timesteps > 1:
+        target_T = max(1, args.timesteps // 2)
         logger.info(f"Calibrating SNN timesteps: {args.timesteps} -> {target_T}")
         final_snn_model = calibrate_timesteps(final_snn_model, args.timesteps, target_T)
     

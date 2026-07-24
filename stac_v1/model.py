@@ -14,19 +14,28 @@ class SurrogateSpikeFunction(torch.autograd.Function):
     Binary spike with a smooth surrogate gradient for backprop.
 
     Forward: step(x > 0)
-    Backward: Gaussian bump derivative approximation
+    Backward: Gaussian bump derivative approximation, with width `sigma`.
+
+    `sigma` must match the units of the input. The membrane potential here is in mV and
+    sits ~10-20 mV from threshold, where a unit-width bump evaluates to exp(-100)~1e-44
+    and underflows float32 to exactly zero — no gradient reaches the spiking layer at
+    all. Sizing sigma to the membrane scale (AdEx's delta_T) keeps the surrogate usable.
     """
 
     @staticmethod
-    def forward(ctx, input_tensor: torch.Tensor) -> torch.Tensor:
+    def forward(ctx, input_tensor: torch.Tensor, sigma: float = 1.0) -> torch.Tensor:
         ctx.save_for_backward(input_tensor)
+        ctx.sigma = float(sigma) if float(sigma) > 0 else 1.0
         return (input_tensor > 0).to(dtype=torch.float32)
 
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
+    def backward(ctx, grad_output: torch.Tensor):
         (input_tensor,) = ctx.saved_tensors
-        spike_pseudo_grad = torch.exp(-(input_tensor**2) / 2.0) / math.sqrt(2 * math.pi)
-        return grad_output * spike_pseudo_grad
+        sigma = ctx.sigma
+        scaled = input_tensor / sigma
+        spike_pseudo_grad = torch.exp(-(scaled**2) / 2.0) / (sigma * math.sqrt(2 * math.pi))
+        # No gradient for the non-tensor `sigma` argument.
+        return grad_output * spike_pseudo_grad, None
 
 
 surrogate_spike = SurrogateSpikeFunction.apply
@@ -86,10 +95,39 @@ class DLPFCAdExNeuron(nn.Module):
         dw = (dt / tau_w) * (self.a * (V - self.V_rest) - w)
         w_new = w + dw
 
-        spike = surrogate_spike(V_new - self.V_th)
+        # Width the surrogate gradient in membrane units, so gradients survive the mV
+        # scale of (V - V_th) instead of underflowing to zero.
+        spike = surrogate_spike(V_new - self.V_th, float(delta_T.detach().item()))
         V_final = torch.where(spike > 0.5, self.V_reset, V_new)
         w_final = w_new + self.b * spike
         return spike, V_final, w_final
+
+
+class CurrentDrive(nn.Module):
+    """
+    Maps a projection's output into the AdEx neuron's excitable current range.
+
+    An AdEx neuron settles at V ~= V_rest + I, so it only ever spikes when the injected
+    current is on the order of (V_th - V_rest) — 15 mV for the shipped parameters. A raw
+    nn.Linear over transformer hidden states produces currents of order 1, which pins the
+    membrane ~14 mV below threshold: the layer emitted exactly zero spikes for every
+    input, the L1 spike penalty was identically zero, and (since the surrogate gradient
+    vanishes that far from threshold) no gradient could ever correct it.
+
+    Normalising per feature and rescaling by a learnable gain/offset centres the
+    population's steady state on threshold, so roughly half the neurons are active and
+    training can move the rest either way.
+    """
+
+    def __init__(self, size: int, *, drive: float):
+        super().__init__()
+        self.norm = nn.LayerNorm(size)
+        # Offset puts the steady state at threshold; gain spreads the population around it.
+        self.gain = nn.Parameter(torch.tensor(float(drive) / 2.0, dtype=torch.float32))
+        self.offset = nn.Parameter(torch.tensor(float(drive), dtype=torch.float32))
+
+    def forward(self, current: torch.Tensor) -> torch.Tensor:
+        return self.gain * self.norm(current) + self.offset
 
 
 class DLPFCLayer(nn.Module):
@@ -116,11 +154,21 @@ class DLPFCLayer(nn.Module):
         self.output_size = int(output_size)
         self.num_recurrent_layers = int(num_recurrent_layers)
 
+        # Current needed to bring the membrane from rest to threshold. The adaptation
+        # current settles at w = a * (V - V_rest), so it cancels a factor (1 + a) of the
+        # injected current: the steady state is V_rest + I / (1 + a). Sizing the drive
+        # accordingly is what actually puts the neuron at threshold.
+        drive = float((1.0 + adex_params.a) * (adex_params.V_th - adex_params.V_rest))
+
         self.projection = nn.Linear(input_size, self.output_size)
+        self.input_drive = CurrentDrive(self.output_size, drive=drive)
         self.adex0 = DLPFCAdExNeuron(adex_params)
 
         self.recurrent_projections = nn.ModuleList(
             [nn.Linear(self.output_size, self.output_size) for _ in range(self.num_recurrent_layers)]
+        )
+        self.recurrent_drives = nn.ModuleList(
+            [CurrentDrive(self.output_size, drive=drive) for _ in range(self.num_recurrent_layers)]
         )
         self.recurrent_neurons = nn.ModuleList(
             [DLPFCAdExNeuron(adex_params) for _ in range(self.num_recurrent_layers)]
@@ -143,13 +191,13 @@ class DLPFCLayer(nn.Module):
         spk_list = []
         for t in range(seq_len):
             x_t = hidden_states[:, t, :]
-            current = self.projection(x_t)
+            current = self.input_drive(self.projection(x_t))
             spk0, V0, w0 = self.adex0(current, V0, w0)
             spk_out = self.dropout(spk0)
 
             spk_rec_input = spk_out
             for i in range(self.num_recurrent_layers):
-                rec_current = self.recurrent_projections[i](spk_rec_input)
+                rec_current = self.recurrent_drives[i](self.recurrent_projections[i](spk_rec_input))
                 spk_rec, V_rec[i], w_rec[i] = self.recurrent_neurons[i](rec_current, V_rec[i], w_rec[i])
                 spk_rec_input = self.dropout(spk_rec)
 
@@ -160,8 +208,13 @@ class DLPFCLayer(nn.Module):
 
 class HyperdimensionalMemoryModule(nn.Module):
     """
-    Encodes spike trains into a memory bias vector via a fixed random projection
-    into a high-dimensional space, followed by a small MLP.
+    Encodes spike trains into a memory bias via a fixed random projection into a
+    high-dimensional space, followed by a small MLP.
+
+    Pooling is *causal*: position t sees only spikes from positions <= t. Averaging over
+    the whole sequence instead (the previous behaviour) mixed spikes from future tokens
+    into every earlier position, which leaks the answer into a next-token training
+    objective and makes reported training loss optimistic.
     """
 
     def __init__(self, input_dim: int, hdm_dim: int, output_dim: int):
@@ -176,7 +229,19 @@ class HyperdimensionalMemoryModule(nn.Module):
         )
 
     def forward(self, spike_train: torch.Tensor) -> torch.Tensor:
-        pooled_spikes = torch.mean(spike_train, dim=1)
+        """
+        Args:
+            spike_train: [batch, seq_len, input_dim]
+
+        Returns:
+            [batch, seq_len, output_dim] — a per-position memory bias built from the
+            running (causal) mean of the spike train.
+        """
+        seq_len = spike_train.size(1)
+        counts = torch.arange(
+            1, seq_len + 1, device=spike_train.device, dtype=spike_train.dtype
+        ).view(1, seq_len, 1)
+        pooled_spikes = spike_train.cumsum(dim=1) / counts
         hdm_vector = pooled_spikes @ self.proj_matrix
         memory_bias = self.mlp(hdm_vector)
         return memory_bias
@@ -223,8 +288,9 @@ class DLPFCTransformer(nn.Module):
         last_hidden = gpt_out.last_hidden_state
 
         spk_trains = self.dlpfc(last_hidden)
+        # memory_bias is per-position and causal, so it is added position-wise.
         memory_bias = self.memory_module(spk_trains)
-        combined = spk_trains + memory_bias.unsqueeze(1)
+        combined = spk_trains + memory_bias
         combined = self.dropout(self.layer_norm(combined))
         logits = self.lm_head(combined)
         return logits, spk_trains

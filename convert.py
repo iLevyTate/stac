@@ -136,6 +136,22 @@ def create_calibration_data(tokenizer: AutoTokenizer, num_samples: int = 10, max
     
     return inputs
 
+# Attribute used to record how a model was actually converted, so the saved metadata
+# reports the truth even when the full conversion silently fell back.
+CONVERSION_MODE_ATTR = "_stac_conversion_mode"
+
+
+def _mark_simplified_fallback(model: torch.nn.Module) -> torch.nn.Module:
+    """Tag a model produced by the simplified fallback path."""
+    setattr(model, CONVERSION_MODE_ATTR, "simplified_fallback")
+    return model
+
+
+def was_simplified(model: torch.nn.Module) -> bool:
+    """True when `model` came from the simplified path (directly or via fallback)."""
+    return str(getattr(model, CONVERSION_MODE_ATTR, "simplified")) != "ann2snn"
+
+
 def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str, torch.Tensor], timesteps: int = 64, device: str = 'cpu') -> torch.nn.Module:
     """Convert model to SNN using SpikeZIP-TF method."""
     logger.info("Running SpikeZIP-TF conversion...")
@@ -172,34 +188,36 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
     
     # Step 3: Prepare calibration dataloader format
     logger.info("Preparing calibration data...")
-    calib_data_list: List[Tuple[Dict[str, torch.Tensor], None]] = []
-    
-    # Create a simple dataloader-like structure (data, target)
-    # Since our calibration data only needs input_ids and attention_mask
+    # SpikingJelly's Converter iterates `for (imgs, _) in dataloader` and calls
+    # `imgs.to(device)` / `ann(imgs)`, so each item must be a *tensor* and not the
+    # dict produced by the tokenizer. Feeding dicts raised AttributeError inside the
+    # converter, which the broad except below turned into a silent fallback.
+    calib_data_list: List[Tuple[torch.Tensor, None]] = []
+
     with torch.no_grad():
         for i in range(len(calibration_data["input_ids"])):
-            sample = {
-                "input_ids": calibration_data["input_ids"][i].unsqueeze(0),
-                "attention_mask": calibration_data["attention_mask"][i].unsqueeze(0)
-            }
-            calib_data_list.append((sample, None))
-    
+            calib_data_list.append((calibration_data["input_ids"][i].unsqueeze(0), None))
+
     # Check if Converter is available
     if Converter is None:
         logger.error("Converter not available, falling back to simplified conversion")
         return simplified_conversion(model, timesteps)
-    
+
     try:
         # Step 4: SpikeZIP-TF conversion
         logger.info(f"Converting to SNN with {timesteps} timesteps...")
-        
+
+        # NOTE: Converter's signature is (dataloader, device=None, mode='Max',
+        # momentum=0.1, fuse_flag=True). It has no `T` parameter — passing one raised
+        # TypeError on every single run, so this branch could never succeed and the
+        # pipeline silently degraded to simplified_conversion while still reporting
+        # a full conversion. The timestep count is applied by the caller instead.
         snn_converter = Converter(
-            mode="max",
             dataloader=calib_data_list,
-            T=timesteps,
-            device=device
+            mode="max",
+            device=device,
         )
-        
+
         try:
             # This might fail on the first attempt due to complex model structure
             # We'll use a try-except block to handle the conversion
@@ -240,17 +258,24 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
                             logger.info(f"Replaced attention with SpikeAttention ({num_heads} heads)")
 
             logger.info("SNN conversion complete!")
+            setattr(snn_model, CONVERSION_MODE_ATTR, "ann2snn")
             return snn_model
-            
+
         except Exception as e:
-            logger.error(f"Failed to convert to SNN: {e}")
-            logger.info("Falling back to simplified conversion...")
+            logger.warning(
+                f"Full ann2snn conversion failed ({type(e).__name__}: {e}). "
+                "Falling back to the simplified conversion — the result is NOT an "
+                "ann2snn-converted SNN and will be recorded as simplified."
+            )
             # If conversion fails, use the simplified approach
-            return simplified_conversion(model, timesteps)
+            return _mark_simplified_fallback(simplified_conversion(model, timesteps))
     except Exception as e:
-        logger.error(f"Error during SNN conversion: {e}")
-        logger.info("Falling back to simplified conversion...")
-        return simplified_conversion(model, timesteps)
+        logger.warning(
+            f"Full ann2snn conversion could not be set up ({type(e).__name__}: {e}). "
+            "Falling back to the simplified conversion — the result is NOT an "
+            "ann2snn-converted SNN and will be recorded as simplified."
+        )
+        return _mark_simplified_fallback(simplified_conversion(model, timesteps))
 
 def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.nn.Module:
     """
@@ -330,6 +355,8 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
         model.forward = types.MethodType(snn_forward, model)
     
     logger.info("Applied simplified SNN conversion")
+    if not hasattr(model, CONVERSION_MODE_ATTR):
+        setattr(model, CONVERSION_MODE_ATTR, "simplified")
     return model
 
 def save_snn_model(model: torch.nn.Module, path: str, timesteps: Optional[int] = None, simplified: bool = True) -> bool:
@@ -396,11 +423,14 @@ def main() -> int:
         )
     else:
         logger.info("Loading model without quantization (full precision)...")
+        # Do NOT pass device_map here: it makes `accelerate` a hard requirement even
+        # for the plain full-precision path (transformers raises ImportError), while
+        # requirements.txt lists accelerate as optional. A plain .to(device) is
+        # equivalent for a single-device load.
         model = AutoModelForCausalLM.from_pretrained(
-            args.model_name, 
-            device_map=device,
+            args.model_name,
             torch_dtype=torch.float32  # Use float32 for conversion compatibility
-        )
+        ).to(device)
     
     model.eval()
     
@@ -430,9 +460,18 @@ def main() -> int:
         # Step 4: Save the converted model
         os.makedirs(args.output_dir, exist_ok=True)
         logger.info(f"Saving converted SNN model to {args.output_dir}")
-        
+
+        # Record what the pipeline actually produced, not what was requested. A run
+        # without --simplified can still end up simplified via the fallback above.
+        simplified_used = was_simplified(snn_model)
+        if simplified_used and not args.simplified:
+            logger.warning(
+                "Requested full conversion but the simplified path was used; "
+                "recording simplified=True in the saved metadata."
+            )
+
         # Save SNN model
-        save_snn_model(snn_model, f"{args.output_dir}/snn_model.pt", timesteps=args.timesteps, simplified=args.simplified)
+        save_snn_model(snn_model, f"{args.output_dir}/snn_model.pt", timesteps=args.timesteps, simplified=simplified_used)
         tokenizer.save_pretrained(args.output_dir)
         
         # Also save model config for reference
@@ -442,7 +481,9 @@ def main() -> int:
         # Save SNN-specific attributes in a separate config file
         snn_config = {
             "timesteps": args.timesteps,
-            "simplified": args.simplified,
+            "simplified": simplified_used,
+            "simplified_requested": args.simplified,
+            "conversion_mode": str(getattr(snn_model, CONVERSION_MODE_ATTR, "simplified")),
             "base_model": args.model_name
         }
         

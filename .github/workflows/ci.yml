@@ -72,6 +72,15 @@ jobs:
     - name: Run STAC V1 unit tests (gating)
       run: |
         python tests/test_v1.py
+
+    - name: Run the pytest suite (gating)
+      # tests/test_conversational_snn.py used to be uncollectable (its test functions
+      # request fixtures), so this suite never ran in CI. Pin a tiny model so the
+      # conversational tests stay fast.
+      env:
+        STAC_TEST_MODEL: sshleifer/tiny-gpt2
+      run: |
+        python -m pytest tests/ -q
     
   documentation:
     runs-on: ubuntu-latest

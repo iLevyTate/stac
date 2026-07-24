@@ -17,8 +17,12 @@ from stac_v1.pipeline import STACV1Config, build_dataloader_from_texts, build_mo
 
 print("--- Setting up STAC V1 Tests (imported implementation) ---")
 
+# Allow pointing the suite at a locally available model (a path or another hub id) so it
+# can run without network access to the Hugging Face hub.
+TEST_MODEL_NAME = os.environ.get("STAC_TEST_MODEL", "sshleifer/tiny-gpt2")
+
 TEST_CFG = STACV1Config(
-    model_name="sshleifer/tiny-gpt2",
+    model_name=TEST_MODEL_NAME,
     seq_length=16,
     dlpfc_output_size=8,
     num_recurrent_layers=1,
@@ -116,6 +120,25 @@ def test_dlpfc_layer():
     assert spk_trains.shape == expected_shape, f"Output shape mismatch: {spk_trains.shape} vs {expected_shape}"
     assert spk_trains.dtype == torch.float32, f"Output dtype mismatch: {spk_trains.dtype}"
     print("  Output shape and dtype OK.")
+
+    # The layer must actually spike. Shape/dtype checks alone passed for a layer whose
+    # neurons could never reach threshold, which made the whole spiking pathway (and the
+    # L1 spike penalty built on it) a silent no-op.
+    assert set(torch.unique(spk_trains).tolist()) <= {0.0, 1.0}, "Spike train is not binary"
+    spike_rate = spk_trains.mean().item()
+    assert spike_rate > 0.0, "DLPFC layer emitted no spikes at all — neurons never reach threshold"
+    assert spike_rate < 1.0, "DLPFC layer spikes on every step — no sparsity"
+    print(f"  Spike rate {spike_rate:.3f} is in (0, 1). OK.")
+
+    # And gradients must reach the spiking parameters, or the layer can never train.
+    layer.train()
+    grad_probe = torch.randn(batch_size, seq_len, input_size, device=test_device)
+    layer.zero_grad(set_to_none=True)
+    layer(grad_probe).sum().backward()
+    proj_grad = layer.projection.weight.grad
+    assert proj_grad is not None and proj_grad.abs().sum().item() > 0.0, \
+        "No gradient reached the DLPFC projection — the surrogate gradient vanished"
+    print("  Surrogate gradient reaches the projection. OK.")
     print("DLPFCLayer Test PASSED.")
 
 def test_memory_module():
@@ -130,10 +153,23 @@ def test_memory_module():
     spike_train = torch.randint(0, 2, (batch_size, seq_len, input_dim), dtype=torch.float, device=test_device)
     with torch.no_grad():
         memory_bias = module(spike_train)
-    expected_shape = (batch_size, output_dim)
+    expected_shape = (batch_size, seq_len, output_dim)
     assert memory_bias.shape == expected_shape, f"Output shape mismatch: {memory_bias.shape} vs {expected_shape}"
     assert memory_bias.dtype == torch.float32, f"Output dtype mismatch: {memory_bias.dtype}"
     print("  Output shape and dtype OK.")
+
+    # Pooling must be causal: changing a spike at the LAST position may not alter the
+    # memory bias at earlier positions.
+    perturbed = spike_train.clone()
+    perturbed[:, -1, :] = 1.0 - perturbed[:, -1, :]
+    with torch.no_grad():
+        perturbed_bias = module(perturbed)
+    earlier = slice(0, seq_len - 1)
+    assert torch.allclose(memory_bias[:, earlier], perturbed_bias[:, earlier]), \
+        "Memory bias for earlier positions changed when a future spike changed (non-causal pooling)"
+    assert not torch.allclose(memory_bias[:, -1], perturbed_bias[:, -1]), \
+        "Memory bias at the final position ignored its own spikes"
+    print("  Causal pooling OK.")
     print("HyperdimensionalMemoryModule Test PASSED.")
 
 def test_dlpfc_transformer():

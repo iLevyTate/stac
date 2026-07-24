@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -15,7 +16,7 @@ from transformers import GPT2Tokenizer, get_linear_schedule_with_warmup
 
 from loihi_constraints import validate_loihi_export_readiness, write_report
 
-from .model import AdExParams, DLPFCTransformer
+from .model import AdExParams, DLPFCAdExNeuron, DLPFCTransformer
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,16 @@ def freeze_for_hybrid_finetune(
     """
     for p in model.parameters():
         p.requires_grad = True
+
+    # model.py pins the AdEx reference potentials as non-trainable by design. The blanket
+    # enable above silently un-froze them, so hybrid fine-tuning was training V_th /
+    # V_reset / V_rest against that stated design. Re-pin them.
+    for module in model.modules():
+        if isinstance(module, DLPFCAdExNeuron):
+            for fixed in ("V_th", "V_reset", "V_rest"):
+                param = getattr(module, fixed, None)
+                if param is not None:
+                    param.requires_grad = False
 
     if freeze_backbone:
         for p in model.gpt2.parameters():
@@ -255,10 +266,20 @@ def train_steps(
         raise RuntimeError("No trainable parameters. Check hybrid fine-tuning freeze settings.")
 
     optimizer = AdamW(trainable_params, lr=float(cfg.learning_rate), weight_decay=float(cfg.weight_decay))
+    total_steps = max(1, int(max_steps))
+    # Cap warmup so it cannot swallow the whole run. With the default warmup_steps=100 and
+    # the documented short runs (--steps 3), the schedule never left warmup: every step
+    # ran at a small fraction of the configured learning rate, so nothing trained.
+    warmup_steps = min(int(cfg.warmup_steps), max(0, total_steps // 10))
+    if warmup_steps != int(cfg.warmup_steps):
+        logging.getLogger(__name__).info(
+            "Clamping warmup_steps %d -> %d for a %d-step run",
+            int(cfg.warmup_steps), warmup_steps, total_steps,
+        )
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=int(cfg.warmup_steps),
-        num_training_steps=max(1, int(max_steps)),
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
     )
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -270,7 +291,18 @@ def train_steps(
     spike_neuron_min_sum = 0.0
     spike_neuron_max_sum = 0.0
 
-    for batch in dataloader:
+    # Repeat the dataloader until max_steps is reached. Iterating it once silently capped
+    # a run at len(dataloader) steps, so `--steps N` quietly did fewer than N.
+    def _step_batches():
+        while True:
+            empty = True
+            for batch in dataloader:
+                empty = False
+                yield batch
+            if empty:
+                return
+
+    for batch in _step_batches():
         if steps >= max_steps:
             break
 
