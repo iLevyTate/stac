@@ -26,6 +26,22 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from typing import Dict, List, Tuple, Optional, Union
 
+# Configure logging BEFORE importing spikingjelly. Importing spikingjelly calls
+# logging.info() at module scope, which installs a root StreamHandler at level WARNING —
+# after that, the `hasHandlers()` guard below skips configuration and every INFO message
+# from this module is dropped. Running this file as a CLI produced no progress output at
+# all as a result.
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('snn_conversion.log')
+        ]
+    )
+logger = logging.getLogger("smollm2_converter")
+
 # Import and check SpikingJelly version first
 import importlib.metadata
 from packaging.version import parse
@@ -65,17 +81,6 @@ SurrogateModule = get_surrogate()
 Converter = get_converter()
 Quantizer = get_quantizer()
 
-# Configure logging
-if not logging.getLogger().hasHandlers():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('snn_conversion.log')
-        ]
-    )
-logger = logging.getLogger("smollm2_converter")
 
 # Spike-compatible layer normalization
 class SpikeLayerNorm(nn.Module):
@@ -423,6 +428,39 @@ class QuantizedHashedEmbedding(nn.Module):
         return out.to(dtype=torch.float32)
 
 
+def _untie_input_output_embeddings(model: nn.Module, reason: str) -> None:
+    """
+    Break HuggingFace's input/output embedding weight tying.
+
+    GPT-2 and friends tie `lm_head.weight` to the input embedding table. Once the input
+    embedding is replaced by a bucketed or fake-quantized module, that tie is actively
+    harmful: `tie_weights()` — which `save_pretrained`, `from_pretrained` and
+    `resize_token_embeddings` all call — re-points the output head at the new table.
+    With bucketing that silently turned a vocab-sized output layer into a
+    num_buckets-sized one (the model emitted bucket scores instead of token logits);
+    with quantization it raised
+    "AttributeError: 'QuantizedEmbedding' object has no attribute 'weight'".
+    """
+    config = getattr(model, "config", None)
+    if config is None or not getattr(config, "tie_word_embeddings", False):
+        return
+
+    # Give the output head its own storage before dropping the tie.
+    head = getattr(model, "lm_head", None)
+    head_weight = getattr(head, "weight", None) if head is not None else None
+    if isinstance(head_weight, torch.Tensor):
+        with torch.no_grad():
+            head.weight = nn.Parameter(
+                head_weight.detach().clone(), requires_grad=head_weight.requires_grad
+            )
+
+    config.tie_word_embeddings = False
+    # `_tied_weights_keys` drives the tying machinery on load; clear it too.
+    if getattr(model, "_tied_weights_keys", None):
+        model._tied_weights_keys = []
+    logger.info(f"Untied input/output embeddings ({reason}).")
+
+
 def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn.Module:
     """
     Replace token embedding table (GPT-2 wte) with bucketed/hashed embedding weights.
@@ -445,6 +483,10 @@ def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn
         )
         if not is_token_embedding:
             continue
+
+        # Break the tie before swapping the table out, while lm_head still aliases the
+        # full-vocab weights it must keep.
+        _untie_input_output_embeddings(model, "embedding bucketing")
 
         w = module.weight.detach()
         vocab, hidden = w.shape
@@ -481,6 +523,9 @@ def apply_fake_int8_quantization_for_loihi(model: nn.Module) -> nn.Module:
     - transformers Conv1D (class name 'Conv1D') and similar linear-like modules with weight+bias
     - nn.Embedding
     """
+    # Replacing the input embedding invalidates weight tying (see the helper's docstring).
+    _untie_input_output_embeddings(model, "fake int8 quantization")
+
     replaced = 0
     for name, module in list(model.named_modules()):
         # find parent
@@ -1245,10 +1290,14 @@ def replace_layernorm_with_spikelayernorm(model):
         if isinstance(module, nn.LayerNorm):
             shape = module.normalized_shape
             new_ln = SpikeLayerNorm(shape, module.eps)
-            
-            # Copy parameters
-            new_ln.weight.data.copy_(module.weight.data)
-            new_ln.bias.data.copy_(module.bias.data)
+
+            # Copy parameters. LayerNorm(elementwise_affine=False) has weight/bias set to
+            # None, which raised "'NoneType' object has no attribute 'data'"; fall back to
+            # the identity affine SpikeLayerNorm is constructed with.
+            if getattr(module, "weight", None) is not None:
+                new_ln.weight.data.copy_(module.weight.data)
+            if getattr(module, "bias", None) is not None:
+                new_ln.bias.data.copy_(module.bias.data)
             
             # Find parent module
             path = name.split('.')
@@ -1265,7 +1314,20 @@ def replace_layernorm_with_spikelayernorm(model):
             
             ln_count += 1
     
-    logger.info(f"Replaced {ln_count} LayerNorm modules with SpikeLayerNorm")
+    if ln_count == 0:
+        other_norms = sorted({
+            type(m).__name__ for _n, m in model.named_modules() if "Norm" in type(m).__name__
+        })
+        logger.warning(
+            "No nn.LayerNorm modules were replaced. "
+            + (
+                f"This model normalises with {other_norms} instead, which this pass does not "
+                "handle (e.g. Llama/SmolLM2 use RMSNorm), so normalization was left unchanged."
+                if other_norms else "The model has no recognisable normalization layers."
+            )
+        )
+    else:
+        logger.info(f"Replaced {ln_count} LayerNorm modules with SpikeLayerNorm")
     return model
 
 def replace_attention_with_spikeattention(model):
@@ -1819,14 +1881,36 @@ def save_snn_model(model, tokenizer, path):
     if config is None:
         config = getattr(getattr(model, 'snn_model', None), 'config', None)
 
-    # Extract/create metadata
+    # Extract/create metadata.
+    #
+    # These fields used to be hardcoded ("relu"/"atan"/is_snn=True) regardless of what the
+    # conversion actually produced: a model converted with skip_gelu_replacement=True (the
+    # default in the test harness) still kept its GELU activations, and a model whose
+    # surrogate gradients were never applied still claimed "atan". Measure instead.
+    activation_classes = sorted({
+        type(m).__name__ for _n, m in model.named_modules()
+        if type(m).__name__ in ("GELU", "GELUActivation", "NewGELUActivation", "ReLU", "SiLU", "SiLUActivation")
+    })
+    spiking_neurons = [
+        _n for _n, m in model.named_modules()
+        if isinstance(m, LIFNode) or type(m).__name__ in ("IFNode", "DLPFCAdExNeuron")
+    ]
+    surrogates = sorted({
+        type(getattr(m, "surrogate_function", None)).__name__
+        for _n, m in model.named_modules()
+        if getattr(m, "surrogate_function", None) is not None
+    })
+
     snn_config = {
         "timesteps": getattr(model, 'T', 16),
         "base_model": getattr(config, '_name_or_path', "") if config is not None else "",
         "model_type": getattr(config, 'model_type', "") if config is not None else "",
-        "activation": "relu",
-        "surrogate_gradient": "atan",
-        "is_snn": True
+        "activations": activation_classes,
+        "surrogate_gradients": surrogates,
+        "spiking_neuron_count": len(spiking_neurons),
+        # Structural only: the neurons exist. Whether they are on the forward path is
+        # checked by loihi_constraints.validate_loihi_export_readiness(sample_input=...).
+        "has_spiking_modules": bool(spiking_neurons),
     }
 
     # Save tokenizer
@@ -1846,6 +1930,49 @@ def save_snn_model(model, tokenizer, path):
     
     logger.info(f"Saved SNN model to {path}")
     return True
+
+def _apply_official_converter(snn_parts_model, calib_data, args, device):
+    """Run SpikingJelly's ann2snn Converter, falling back to the prepared model."""
+    logger.info(f"Applying official SpikingJelly Converter (T={args.timesteps})...")
+
+    # Create a simple dataloader for the SpikingJelly Converter
+    from torch.utils.data import DataLoader, Dataset
+    class CalibrationDataset(Dataset):
+        def __init__(self, calib_data_list):
+            self.data = calib_data_list
+        def __len__(self):
+            return len(self.data)
+        def __getitem__(self, idx):
+            # SpikingJelly converter expects input tensor directly, not dict or tuple usually
+            sample_dict, _ = self.data[idx]
+            return sample_dict['input_ids'].squeeze(0) # Return tensor [seq_len]
+
+    if calib_data:
+        sj_calib_dataset = CalibrationDataset(calib_data)
+        # SpikingJelly converter usually expects batch_size 1 for this type of calibration data
+        sj_calib_dataloader = DataLoader(sj_calib_dataset, batch_size=1) 
+    else:
+        sj_calib_dataloader = None
+        logger.warning("No calibration data for SpikingJelly Converter. Some features might not work optimally.")
+
+    try:
+        # Converter is the class from direct import. Its signature is
+        # (dataloader, device=None, mode='Max', momentum=0.1, fuse_flag=True) — there is
+        # no `spiking_neuron_type` parameter, and passing one raised TypeError before any
+        # conversion happened, so this branch always fell through to the except below.
+        converter_instance = Converter(
+            dataloader=sj_calib_dataloader,
+            mode='max',
+            device=device,
+        )
+        converted_snn_model = converter_instance(snn_parts_model)
+        logger.info("Official SpikingJelly Converter applied.")
+    except Exception as e:
+        logger.error(f"Official SpikingJelly Converter failed: {e}. Using model from simplified_conversion.")
+        converted_snn_model = snn_parts_model 
+    
+    return converted_snn_model
+
 
 def main():
     """Main conversion function."""
@@ -1929,48 +2056,16 @@ def main():
     # (e.g. data-based scaling, specific layer replacements it handles beyond simplified_conversion)
     # If simplified_conversion already does everything, this Converter step might be redundant or for refinement.
     # The prompt implied using official Converter. Let's assume it applies some final touches.
-    logger.info(f"Applying official SpikingJelly Converter (T={args.timesteps})...")
-    # Converter now comes from direct import and is the official one
-    # It needs calibration data in a specific format (typically a DataLoader)
-    # Our create_calibration_data returns a list of tuples. We might need to adapt.
-    
-    # Create a simple dataloader for the SpikingJelly Converter
-    from torch.utils.data import DataLoader, Dataset
-    class CalibrationDataset(Dataset):
-        def __init__(self, calib_data_list):
-            self.data = calib_data_list
-        def __len__(self):
-            return len(self.data)
-        def __getitem__(self, idx):
-            # SpikingJelly converter expects input tensor directly, not dict or tuple usually
-            sample_dict, _ = self.data[idx]
-            return sample_dict['input_ids'].squeeze(0) # Return tensor [seq_len]
-
-    if calib_data:
-        sj_calib_dataset = CalibrationDataset(calib_data)
-        # SpikingJelly converter usually expects batch_size 1 for this type of calibration data
-        sj_calib_dataloader = DataLoader(sj_calib_dataset, batch_size=1) 
+    # `--simplified` was declared but never read: the official Converter ran on every
+    # invocation regardless of the flag (and then fell back), so the documented
+    # "use simplified conversion (no SpikingJelly)" mode did not exist.
+    if args.simplified:
+        logger.info("--simplified: skipping the official SpikingJelly Converter step.")
+        converted_snn_model = snn_parts_model
     else:
-        sj_calib_dataloader = None
-        logger.warning("No calibration data for SpikingJelly Converter. Some features might not work optimally.")
+        converted_snn_model = _apply_official_converter(snn_parts_model, calib_data, args, device)
 
-    try:
-        # Converter is the class from direct import. Its signature is
-        # (dataloader, device=None, mode='Max', momentum=0.1, fuse_flag=True) — there is
-        # no `spiking_neuron_type` parameter, and passing one raised TypeError before any
-        # conversion happened, so this branch always fell through to the except below.
-        converter_instance = Converter(
-            dataloader=sj_calib_dataloader,
-            mode='max',
-            device=device,
-        )
-        converted_snn_model = converter_instance(snn_parts_model)
-        logger.info("Official SpikingJelly Converter applied.")
-    except Exception as e:
-        logger.error(f"Official SpikingJelly Converter failed: {e}. Using model from simplified_conversion.")
-        converted_snn_model = snn_parts_model 
-    
-    # Wrap with TemporalSpikeProcessor for multi-step processing.
+        # Wrap with TemporalSpikeProcessor for multi-step processing.
     # simplified_conversion() already returns a TemporalSpikeProcessor, so re-wrapping
     # would nest T x T timestep loops and apply the logit scaling twice. Only wrap when
     # the SpikingJelly Converter step replaced it with a bare model.

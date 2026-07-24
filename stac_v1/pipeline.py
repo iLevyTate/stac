@@ -137,6 +137,13 @@ def build_dataloader_from_texts(
     shuffle: bool,
 ) -> DataLoader:
     cleaned = [t for t in texts if isinstance(t, str) and t.strip()]
+    if not cleaned:
+        # An empty dataloader used to surface much later as a training run that reported
+        # loss 0.0 / perplexity 1.0. Fail here, where the cause is obvious.
+        raise ValueError(
+            "No usable training texts: every entry was empty or not a string. "
+            "Check --text / --texts_file."
+        )
     tokenized = _tokenize_texts(tokenizer, cleaned, seq_length=seq_length)
     return DataLoader(tokenized, batch_size=int(batch_size), shuffle=bool(shuffle))
 
