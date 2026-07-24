@@ -46,6 +46,15 @@ jobs:
         pip install flake8 || echo "⚠ flake8 install failed"
       continue-on-error: true
 
+    - name: Lint (syntax-level errors only)
+      # flake8 was installed by the step above and then never run. Gate on real errors
+      # (undefined names, syntax errors) rather than style, so this cannot fail on
+      # formatting while still catching a NameError that import checks would miss.
+      run: |
+        flake8 --select=E9,F63,F7,F82 --show-source \
+          smollm2_converter.py convert.py loihi_constraints.py spikingjelly_compat.py \
+          scripts stac_v1 tests
+
     - name: Syntax check (compile every Python file)
       run: |
         python -m compileall -q smollm2_converter.py convert.py loihi_constraints.py spikingjelly_compat.py scripts stac_v1 tests

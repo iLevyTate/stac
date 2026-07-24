@@ -11,6 +11,7 @@ Verifies that the model can maintain state between conversation turns.
 import os
 import torch
 import argparse
+import json
 import logging
 import sys
 import tempfile
@@ -357,9 +358,11 @@ def test_tsp_state_retention(model, tokenizer, args):
     """Deterministic test that TSP can preserve context across turns in incremental mode."""
     logger.info("Running: test_tsp_state_retention")
 
-    # Ensure we have the wrapper
+    # Ensure we have the wrapper. (This used to cap the context at 256 for a model it
+    # only builds when the caller passed an unwrapped model — dead in practice and
+    # inconsistent with the wrapper every other test sees.)
     if not isinstance(model, TemporalSpikeProcessor):
-        model = TemporalSpikeProcessor(model, T=args.timesteps, max_context_length=min(args.max_context_length, 256))
+        model = TemporalSpikeProcessor(model, T=args.timesteps, max_context_length=int(args.max_context_length))
 
     model.reset_cache()
 
@@ -1542,7 +1545,20 @@ def test_loihi_compatibility(model, tokenizer, args):
 def test_loihi_constraints(model, args):
     """Simulation-time Loihi export-readiness checks (no hardware claims)."""
     logger.info("Running: test_loihi_constraints")
-    export_ready, report = validate_loihi_export_readiness(model, intended_weight_bits=8)
+    # Give the validator a real input so it can check that the spiking neurons are
+    # actually invoked, not merely present in the module tree.
+    sample_input = None
+    try:
+        vocab = int(getattr(getattr(model, 'config', None), 'vocab_size', 0))
+        if vocab > 0:
+            device = getattr(args, 'device', 'cpu')
+            sample_input = torch.randint(0, min(vocab, 1000), (1, 8), device=device)
+    except Exception as e:
+        logger.warning(f"Could not build a sample input for the Loihi validator: {e}")
+
+    export_ready, report = validate_loihi_export_readiness(
+        model, intended_weight_bits=8, sample_input=sample_input
+    )
     report_path = write_report(report, Path("local") / "loihi_constraints_reports")
     logger.info(f"Wrote Loihi constraints report: {report_path}")
 
@@ -1652,8 +1668,43 @@ def main():
         base_model.T = args.timesteps
         snn_model = simplified_conversion(base_model, args.timesteps, skip_gelu_replacement=True)
 
+        # simplified_conversion() wraps with the library default (512). Without this the
+        # --max_context_length flag only affected the test harness's own bookkeeping and
+        # never reached the model it was supposed to configure.
+        if hasattr(snn_model, "max_context_length"):
+            snn_model.max_context_length = int(args.max_context_length)
+            logger.info(f"Set model max_context_length to {snn_model.max_context_length}")
+
         # Optional: load PEFT adapter into inner model for parity evaluation
         if args.adapter_dir:
+            # An adapter distilled onto a student with different activations (ReLU vs
+            # GELU MLPs) is being evaluated on a function it never saw. The trainer
+            # records which student it used; warn loudly on a mismatch rather than
+            # reporting a quietly degraded parity number.
+            report_path = Path(args.adapter_dir) / "train_report.json"
+            if report_path.exists():
+                try:
+                    with open(report_path) as f:
+                        train_report = json.load(f)
+                    adapter_relu = bool(train_report.get("replaced_gelu_with_relu", False))
+                    student_relu = not skip_gelu
+                    if adapter_relu != student_relu:
+                        logger.warning(
+                            "Adapter/student mismatch: the adapter was trained with "
+                            f"replaced_gelu_with_relu={adapter_relu}, but this student was built "
+                            f"with replaced_gelu_with_relu={student_relu}. Parity numbers will be "
+                            "misleading. Rebuild one of them to match "
+                            "(train_snn_adapter.py --replace_gelu / --loihi_mode here)."
+                        )
+                    adapter_T = train_report.get("timesteps")
+                    if adapter_T is not None and int(adapter_T) != int(args.timesteps):
+                        logger.warning(
+                            f"Adapter was trained at T={adapter_T} but this run uses "
+                            f"T={args.timesteps}."
+                        )
+                except (OSError, ValueError) as e:
+                    logger.warning(f"Could not read {report_path}: {e}")
+
             try:
                 from peft import PeftModel
                 if hasattr(snn_model, "snn_model"):

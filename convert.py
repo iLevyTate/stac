@@ -152,7 +152,7 @@ def was_simplified(model: torch.nn.Module) -> bool:
     return str(getattr(model, CONVERSION_MODE_ATTR, "simplified")) != "ann2snn"
 
 
-def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str, torch.Tensor], timesteps: int = 64, device: str = 'cpu') -> torch.nn.Module:
+def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str, torch.Tensor], timesteps: int = 64, device: str = 'cpu', batch_size: int = 1) -> torch.nn.Module:
     """Convert model to SNN using SpikeZIP-TF method."""
     logger.info("Running SpikeZIP-TF conversion...")
     
@@ -192,11 +192,16 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
     # `imgs.to(device)` / `ann(imgs)`, so each item must be a *tensor* and not the
     # dict produced by the tokenizer. Feeding dicts raised AttributeError inside the
     # converter, which the broad except below turned into a silent fallback.
+    # `--batch_size` was parsed and documented but never read anywhere; it now controls
+    # how the calibration samples are grouped, which is what the Converter iterates over.
     calib_data_list: List[Tuple[torch.Tensor, None]] = []
+    step = max(1, int(batch_size))
 
     with torch.no_grad():
-        for i in range(len(calibration_data["input_ids"])):
-            calib_data_list.append((calibration_data["input_ids"][i].unsqueeze(0), None))
+        all_ids = calibration_data["input_ids"]
+        for i in range(0, len(all_ids), step):
+            calib_data_list.append((all_ids[i:i + step], None))
+    logger.info(f"Prepared {len(calib_data_list)} calibration batch(es) of up to {step} sample(s)")
 
     # Check if Converter is available
     if Converter is None:
@@ -456,10 +461,11 @@ def main() -> int:
             snn_model = simplified_conversion(model, args.timesteps)
         else:
             snn_model = convert_model_to_spiking(
-                model, 
-                calibration_data, 
+                model,
+                calibration_data,
                 args.timesteps,
-                device
+                device,
+                batch_size=args.batch_size,
             )
         
         # Step 4: Save the converted model

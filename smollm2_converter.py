@@ -435,8 +435,15 @@ def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn
     for name, module in list(model.named_modules()):
         if not isinstance(module, nn.Embedding):
             continue
-        # Heuristic: only apply to token embeddings, not positional embeddings
-        if not (name.endswith("wte") or ".wte" in name):
+        # Heuristic: only apply to token embeddings, not positional embeddings.
+        # `wte` is GPT-2's name; Llama-family models (SmolLM2) call it `embed_tokens`, so
+        # matching only `wte` made --loihi_embed_buckets a silent no-op on the second
+        # advertised architecture.
+        is_token_embedding = (
+            name.endswith("wte") or ".wte" in name
+            or name.endswith("embed_tokens") or ".embed_tokens" in name
+        )
+        if not is_token_embedding:
             continue
 
         w = module.weight.detach()

@@ -6,6 +6,7 @@ from pathlib import Path
 # Allow running this file directly (python tests/test_v1.py) by putting the repo root on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
@@ -32,9 +33,25 @@ TEST_CFG = STACV1Config(
     output_dir=os.path.join(tempfile.gettempdir(), "test_stac_v1_output"),
 )
 
-set_seed(TEST_CFG.seed)
 test_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-os.makedirs(TEST_CFG.output_dir, exist_ok=True)
+
+
+# Importing this module used to reseed numpy/torch globally and create directories as a
+# side effect, which silently changed RNG state for anything else collected in the same
+# pytest session. Do it per test instead, via an autouse fixture (pytest) and explicitly
+# in the __main__ runner.
+@pytest.fixture(autouse=True)
+def _stac_v1_test_env():
+    set_seed(TEST_CFG.seed)
+    os.makedirs(TEST_CFG.output_dir, exist_ok=True)
+    yield
+
+
+def _setup_test_env():
+    """Same setup for the standalone `python tests/test_v1.py` path."""
+    set_seed(TEST_CFG.seed)
+    os.makedirs(TEST_CFG.output_dir, exist_ok=True)
+
 
 # --- Test Functions ---
 
@@ -309,6 +326,7 @@ def run_all_tests():
     ]
     for test_func in test_functions:
         try:
+            _setup_test_env()
             test_func()
             tests_passed += 1
         except AssertionError as e:

@@ -258,6 +258,11 @@ def train_steps(
 
     if hybrid_finetune:
         freeze_for_hybrid_finetune(model, freeze_backbone=True, train_lm_head=train_lm_head)
+    else:
+        # Full fine-tuning still has to honour train_lm_head. Previously this branch did
+        # nothing at all, so `--no_train_lm_head --no_hybrid_finetune` trained the LM head
+        # anyway while the run summary recorded train_lm_head as False.
+        freeze_for_hybrid_finetune(model, freeze_backbone=False, train_lm_head=train_lm_head)
 
     module_counts = _module_param_counts(model)
 
@@ -373,7 +378,18 @@ def train_steps(
     }
 
     if write_loihi_report:
-        export_ready, report = validate_loihi_export_readiness(model, intended_weight_bits=8, require_spiking_neurons=True)
+        # Pass a real input so the validator can confirm the spiking neurons actually run
+        # rather than only existing in the module tree.
+        sample_input = None
+        try:
+            vocab = int(model.gpt2.config.vocab_size)
+            sample_input = torch.randint(0, min(vocab, 1000), (1, 8), device=device)
+        except Exception as e:
+            logging.getLogger(__name__).warning("Could not build a Loihi validator sample input: %s", e)
+
+        export_ready, report = validate_loihi_export_readiness(
+            model, intended_weight_bits=8, require_spiking_neurons=True, sample_input=sample_input
+        )
         report["stac_v1"] = {
             "hybrid_finetune": bool(hybrid_finetune),
             "train_lm_head": bool(train_lm_head),

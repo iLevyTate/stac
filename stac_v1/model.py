@@ -88,6 +88,10 @@ class DLPFCAdExNeuron(nn.Module):
         tau_w = self.tau_w.clamp(min=1e-3)
         delta_T = self.delta_T.clamp(min=1e-3)
 
+        # NOTE: `exp_clamp` is a defensive guard that does not engage in practice. V is
+        # hard-reset to V_reset on every spike, so V <= V_th on entry and the exponent is
+        # never positive: exp_term stays in (0, 1]. It is kept in case the reset rule
+        # changes, not because the runaway it guards against can occur today.
         exp_term = torch.exp((V - self.V_th) / delta_T).clamp(max=exp_clamp)
         dV = (dt / tau_m) * (-(V - self.V_rest) + delta_T * exp_term - w + input_current)
         V_new = V + dV

@@ -27,7 +27,8 @@ logger = logging.getLogger("simple_snn_test")
 
 def main():
     # Parameters
-    model_name = "distilgpt2"
+    # Overridable so the script can run offline or against a local checkpoint.
+    model_name = os.environ.get("STAC_TEST_MODEL", "distilgpt2")
     timesteps = 16
     test_prompt = "Artificial intelligence is"
     output_dir = "simple_test_output"
