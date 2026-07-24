@@ -432,6 +432,10 @@ def simulate_conversation(model, tokenizer, turns=3, device="cpu", max_context_l
     
     # Keep track of tokens for attention mask
     conv_tokens = None
+
+    # Failures seen while generating; a non-empty list fails the whole simulation.
+    generation_errors = []
+    empty_turns = []
     
     # Process each turn
     for i, prompt in enumerate(test_prompts):
@@ -531,6 +535,10 @@ def simulate_conversation(model, tokenizer, turns=3, device="cpu", max_context_l
                     logger.error(f"Error during generation step {j}: {e}")
                     import traceback
                     traceback.print_exc()
+                    # Record it. This used to break out silently and the function still
+                    # returned True at the end, so a turn that crashed mid-generation was
+                    # reported as "Conversation test completed successfully."
+                    generation_errors.append(f"turn {i+1}, step {j}: {type(e).__name__}: {e}")
                     break
         
         # Decode the response
@@ -545,16 +553,34 @@ def simulate_conversation(model, tokenizer, turns=3, device="cpu", max_context_l
         if i > 0:
             logger.info(f"  - Verified turn {i+1} processed with history from previous turns")
         
+        if not response_tokens:
+            empty_turns.append(i + 1)
+
         # Verify position IDs
         if hasattr(model, 'get_position_ids'):
             position_ids = model.get_position_ids()
             logger.info(f"  - Position IDs: {position_ids}")
-            # Verify implementation
             assert torch.all(position_ids >= 0).item(), "Position IDs should be non-negative"
-            # Additional check matching requirement
-            assert position_ids.max().item() >= 0, "Position IDs should be properly managed"
-    
-    # Test passed if it reaches here without errors
+            # `max() >= 0` was implied by the line above and could never fail. Check the
+            # bound that actually matters: position IDs must stay inside the model's
+            # positional capacity, or the embedding lookup raises IndexError.
+            max_pos = getattr(getattr(model, 'config', None), 'max_position_embeddings', None)
+            if max_pos:
+                assert position_ids.max().item() < int(max_pos), (
+                    f"Position ID {position_ids.max().item()} is outside the model's "
+                    f"{max_pos} position embeddings"
+                )
+
+    if generation_errors:
+        for err in generation_errors:
+            logger.error(f"FAIL: generation error — {err}")
+        pytest.fail(f"{len(generation_errors)} generation error(s) during the conversation: {generation_errors[0]}")
+        return False
+    if empty_turns:
+        logger.error(f"FAIL: turns {empty_turns} produced no tokens at all")
+        pytest.fail(f"turns {empty_turns} produced no tokens")
+        return False
+
     logger.info("\nConversation test completed successfully.")
     return True
 

@@ -324,11 +324,16 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
             # For models without explicit thresholds, annotate with metadata.
             # (nn.ReLU has no `threshold` attribute, so there is nothing to scale here.)
             if isinstance(module, torch.nn.ReLU):
-                # Add threshold attribute for when it gets converted to spiking
+                # Annotate the intended spiking threshold. persistent=False keeps it OUT
+                # of state_dict(): as a persistent buffer it added keys that no plain
+                # transformer model has, so reloading the saved weights with
+                # load_state_dict(strict=True) failed with "Unexpected key(s) in
+                # state_dict: ...mlp.act.v_threshold" — while doing nothing functionally,
+                # since nn.ReLU never reads it.
                 module.register_buffer(
-                    'v_threshold', 
+                    'v_threshold',
                     torch.tensor(activation_bound * (T_target / T_original)),
-                    persistent=True
+                    persistent=False
                 )
     
     # 4. Add a custom forward method wrapper

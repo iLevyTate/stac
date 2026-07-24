@@ -457,6 +457,23 @@ def main():
         logger.warning("  Full SNN functionality might be limited")
     logger.info(f"Converted model is available in: {args.output_dir}")
     
+    # Report the conversion that actually ran. `use_simplified` only records the
+    # *fallback* decision (SpikingJelly unimportable), so an explicit --simplified run —
+    # the one in the README's quick start — was written out as simplified_approach:false.
+    # convert.py records the real outcome in snn_config.json, including the case where a
+    # full conversion silently degraded to the simplified path; prefer that.
+    conversion_mode = None
+    simplified_used = bool(args.simplified)
+    snn_config_path = os.path.join(args.output_dir, "snn_config.json")
+    if os.path.exists(snn_config_path):
+        try:
+            with open(snn_config_path) as f:
+                snn_config = json.load(f)
+            simplified_used = bool(snn_config.get("simplified", simplified_used))
+            conversion_mode = snn_config.get("conversion_mode")
+        except (OSError, ValueError) as e:
+            logger.warning(f"Could not read {snn_config_path}: {e}")
+
     # Save summary report
     summary = {
         "model_name": args.model_name,
@@ -467,7 +484,9 @@ def main():
         "use_delayed_spikes": args.use_delayed_spikes,
         "use_function_calling": args.use_function_calling,
         "optimize_for_torchscript": args.optimize_for_torchscript,
-        "simplified_approach": use_simplified,
+        "simplified_approach": simplified_used,
+        "simplified_forced_by_missing_spikingjelly": use_simplified,
+        "conversion_mode": conversion_mode,
         "status": "success",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
