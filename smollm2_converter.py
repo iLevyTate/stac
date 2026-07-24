@@ -833,31 +833,34 @@ class TemporalSpikeProcessor(nn.Module):
                 if total_layers is None:
                     total_layers = getattr(self.snn_model.config, 'n_layer', 0)
 
-            for layer_idx in range(total_layers):
-                key_layer = []
-                value_layer = []
-                # Collect keys and values for each batch item
-                for batch_idx, batch_cache in enumerate(past_key_values_list):
-                    if batch_cache is not None:
-                        # Use the cache for this conversation
+            # The per-conversation caches can only be batched when they all cover the same
+            # number of positions. Concatenating a zero-length placeholder (a conversation
+            # with no cache yet) with a populated one raised "Sizes of tensors must match
+            # except in dimension 0" from torch.cat, so any batch mixing a fresh
+            # conversation with an ongoing one crashed.
+            cache_lengths = {
+                (c[0][0].size(-2) if c is not None else 0) for c in past_key_values_list
+            }
+            if len(cache_lengths) > 1:
+                logger.warning(
+                    f"Conversations in this batch have different cache lengths {sorted(cache_lengths)}; "
+                    "processing them without a KV cache for this step."
+                )
+                past_key_values = None
+            elif cache_lengths == {0}:
+                past_key_values = None
+            else:
+                for layer_idx in range(total_layers):
+                    key_layer = []
+                    value_layer = []
+                    # Collect keys and values for each batch item
+                    for batch_idx, batch_cache in enumerate(past_key_values_list):
                         key_layer.append(batch_cache[layer_idx][0])
                         value_layer.append(batch_cache[layer_idx][1])
-                    else:
-                        # Create empty tensors for conversations without cache
-                        num_heads = getattr(self.snn_model.config, 'num_attention_heads', getattr(self.snn_model.config, 'n_head', 1))
-                        head_dim = self.snn_model.config.hidden_size // num_heads if num_heads > 0 else self.snn_model.config.hidden_size
-                        # Correct key/value shape: (batch, num_heads, seq_len(0), head_dim)
-                        empty_key = torch.zeros((1, num_heads, 0, head_dim), device=self.device)
-                        empty_value = torch.zeros_like(empty_key)
-                        key_layer.append(empty_key)
-                        value_layer.append(empty_value)
-                # Stack along batch dimension
-                keys = torch.cat(key_layer, dim=0)
-                values = torch.cat(value_layer, dim=0)
-                past_key_values.append((keys, values))
-            # After constructing, check if they contain any non-zero sequence length
-            if all(k.size(-2) == 0 for k, _ in past_key_values):
-                past_key_values = None
+                    # Stack along batch dimension
+                    keys = torch.cat(key_layer, dim=0)
+                    values = torch.cat(value_layer, dim=0)
+                    past_key_values.append((keys, values))
         else:
             # Standard non-batched processing using global KV cache
             past_key_values = self.kv_cache if use_cache else None
