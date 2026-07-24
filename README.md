@@ -80,7 +80,13 @@ python tests/test_conversational_snn.py --model_name distilgpt2 --test_all --tim
 **Pending or in progress**
 - Spike-count telemetry hooks for V2 (STAC V1 reports spike statistics; V2 does not).
 - Real spiking dynamics in V2 (`SpikeSoftmax` / `SpikeAttention` currently bypass their
-  spiking neurons).
+  spiking neurons). `loihi_constraints.validate_loihi_export_readiness(...,
+  sample_input=...)` measures this directly and reports it as a HARD_BLOCK: the default
+  conversion has 6 spiking neurons in the module tree, 0 of which run.
+- Spiking dynamics in `--loihi_mode`. That path swaps attention for
+  `LoihiCausalContextMixer`, which removes the dense-attention blocker but is itself
+  non-spiking (tanh + a leaky context accumulator), so the resulting model contains no
+  spiking neurons at all and the constraints validator fails it accordingly.
 - Hardware benchmarking on Loihi-2 and Akida.
 - Expanded operator support (rotary embeddings, flash-attention variants, etc.).
 - Integration with the SCANUE multi-agent alignment layer.

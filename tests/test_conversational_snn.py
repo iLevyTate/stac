@@ -30,8 +30,12 @@ from smollm2_converter import (
     TemporalSpikeProcessor
 )
 import pytest
-from _pytest.outcomes import Failed, Skipped
 import torch.profiler
+
+# Public accessors for pytest's outcome exceptions. `_pytest.outcomes` is private and its
+# layout is not guaranteed across pytest releases.
+Skipped = pytest.skip.Exception
+Failed = pytest.fail.Exception
 
 # Forwards per profiled measurement. Averaging over several calls keeps the wall-clock
 # comparison from being dominated by one-off warmup cost.
