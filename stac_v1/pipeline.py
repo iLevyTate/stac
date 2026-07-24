@@ -338,12 +338,20 @@ def train_steps(
         spike_neuron_max_sum += s["spike_neuron_mean_max"]
         steps += 1
 
-    avg_loss = loss_sum / max(1, steps)
-    avg_l1 = l1_sum / max(1, steps)
-    avg_spike = spike_sum / max(1, steps)
-    avg_spike_frac_zero = spike_frac_zero_sum / max(1, steps)
-    avg_spike_neuron_min = spike_neuron_min_sum / max(1, steps)
-    avg_spike_neuron_max = spike_neuron_max_sum / max(1, steps)
+    if steps == 0:
+        # Dividing by max(1, 0) reported train_loss 0.0 / perplexity 1.0 for a run that
+        # never trained — a perfect-looking result from an empty dataloader.
+        raise RuntimeError(
+            "train_steps completed 0 steps: the dataloader yielded no batches. "
+            "Check the training texts and batch size."
+        )
+
+    avg_loss = loss_sum / steps
+    avg_l1 = l1_sum / steps
+    avg_spike = spike_sum / steps
+    avg_spike_frac_zero = spike_frac_zero_sum / steps
+    avg_spike_neuron_min = spike_neuron_min_sum / steps
+    avg_spike_neuron_max = spike_neuron_max_sum / steps
 
     out: Dict[str, float] = {
         "steps": float(steps),

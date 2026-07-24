@@ -104,15 +104,22 @@ def main():
             logger.info(f"ReLU model:     '{predicted_token_relu}'")
             logger.info(f"SNN model:      '{predicted_token_snn}'")
             
-            if predicted_token_snn == predicted_token_relu:
-                logger.info("✅ SNN model prediction matches ReLU model!")
-            else:
-                logger.info("⚠️ SNN model prediction differs from ReLU model")
-            
+            # The SNN is converted *from* the ReLU model, so their next-token predictions
+            # must agree. This used to log a warning and still return 0, which made the
+            # script's exit code meaningless: the mismatch it exists to detect could not
+            # fail the run.
+            if predicted_token_snn != predicted_token_relu:
+                logger.error(
+                    f"SNN prediction '{predicted_token_snn}' differs from the ReLU model it "
+                    f"was converted from ('{predicted_token_relu}')"
+                )
+                return 1
+            logger.info("SNN model prediction matches ReLU model.")
+
             # Save the SNN model (optional)
             # torch.save(snn_model.state_dict(), os.path.join(output_dir, "snn_model.pt"))
             # logger.info(f"SNN model saved to {output_dir}")
-            
+
             return 0
         
         except Exception as e:

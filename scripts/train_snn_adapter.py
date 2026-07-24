@@ -163,8 +163,14 @@ def main() -> int:
 
         # Compare logits on all positions
         if args.last_token_only:
-            t_logits_use = t_logits[:, -1:, :]
-            s_logits_use = s_logits[:, -1:, :]
+            # Select each sequence's last *real* token. The tokenizer right-pads, so
+            # `[:, -1:, :]` picked the logits after the padding for every sequence
+            # shorter than the longest in the batch — i.e. distilled the wrong position.
+            last_idx = tok.attention_mask.sum(dim=1).long() - 1
+            last_idx = last_idx.clamp(min=0)
+            rows = torch.arange(s_logits.size(0), device=s_logits.device)
+            t_logits_use = t_logits[rows, last_idx].unsqueeze(1)
+            s_logits_use = s_logits[rows, last_idx].unsqueeze(1)
         else:
             t_logits_use = t_logits
             s_logits_use = s_logits

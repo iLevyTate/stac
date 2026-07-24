@@ -203,4 +203,22 @@ if __name__ == "__main__":
     logger.info("\n===== Conversation Transcript =====")
     for msg in conv:
         prefix = "User" if msg["role"] == "user" else "Assistant"
-        logger.info(f"{prefix}: {msg['text']}") 
+        logger.info(f"{prefix}: {msg['text']}")
+
+    # Check what the run is supposed to demonstrate and exit non-zero when it does not.
+    # Previously this script printed a transcript and always exited 0, so a run that
+    # produced no output at all still looked like a pass.
+    expected_messages = 2 * args.turns
+    failures = []
+    if len(conv) != expected_messages:
+        failures.append(f"expected {expected_messages} messages over {args.turns} turns, got {len(conv)}")
+    empty_replies = [i for i, m in enumerate(conv) if m["role"] == "assistant" and not m["text"].strip()]
+    if empty_replies:
+        failures.append(f"assistant produced empty replies at turns {empty_replies}")
+
+    if failures:
+        for f in failures:
+            logger.error(f"FAIL: {f}")
+        sys.exit(1)
+    logger.info(f"PASS: {args.turns} turns completed with non-empty replies.")
+    sys.exit(0)

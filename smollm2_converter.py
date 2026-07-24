@@ -116,7 +116,7 @@ class SpikeSoftmax(nn.Module):
 
 class SpikeAttention(nn.Module):
     """Spiking-compatible self-attention implementation."""
-    def __init__(self, embed_dim, num_heads, T=16, causal=True):
+    def __init__(self, embed_dim, num_heads, T=16, causal=True, layer_idx=None):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -126,6 +126,9 @@ class SpikeAttention(nn.Module):
         # Controls the return-tuple layout expected by the host transformer block.
         # "gpt2": (output, present[, attn]); "llama": (output, attn, present).
         self.return_mode = "gpt2"
+        # Required to update a transformers Cache object (Llama-style decoders index the
+        # cache per layer). Set when replacing an attention module that carries one.
+        self.layer_idx = layer_idx
 
         self.q_proj = nn.Linear(embed_dim, embed_dim)
         self.k_proj = nn.Linear(embed_dim, embed_dim)
@@ -140,24 +143,37 @@ class SpikeAttention(nn.Module):
         
         self.spike_softmax = SpikeSoftmax(T=T, dim=-1)
     
-    def forward(self, hidden_states, attention_mask=None, layer_past=None, 
-               head_mask=None, use_cache=False, output_attentions=False, **kwargs):
+    def forward(self, hidden_states, attention_mask=None, layer_past=None,
+               head_mask=None, use_cache=False, output_attentions=False,
+               past_key_value=None, **kwargs):
         batch_size, seq_length = hidden_states.shape[:2]
-        
+
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
-        
+
         q = q.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        if layer_past is not None:
-            past_key, past_value = layer_past
-            k = torch.cat((past_key, k), dim=-2)
-            v = torch.cat((past_value, v), dim=-2)
-        
-        present = (k, v) if use_cache else None
+
+        # GPT-2 blocks pass the cache as `layer_past`; Llama-style decoders pass it as
+        # `past_key_value`, and it may be a transformers Cache object rather than a
+        # (k, v) tuple. Reading only `layer_past` meant the cache branch never ran on
+        # Llama/SmolLM2, and returning a bare tuple made LlamaModel crash later with
+        # "'tuple' object has no attribute 'to_legacy_cache'".
+        cache_obj = past_key_value if past_key_value is not None else layer_past
+        present = None
+
+        if cache_obj is not None and hasattr(cache_obj, "update"):
+            # transformers Cache: it stores the new keys/values and returns the full history.
+            k, v = cache_obj.update(k, v, self.layer_idx)
+            present = cache_obj if use_cache else None
+        else:
+            if cache_obj is not None:
+                past_key, past_value = cache_obj[0], cache_obj[1]
+                k = torch.cat((past_key, k), dim=-2)
+                v = torch.cat((past_value, v), dim=-2)
+            present = (k, v) if use_cache else None
         
         # Reset neuron states to handle dynamic input shapes
         functional.reset_net(self.q_spk)
@@ -187,25 +203,42 @@ class SpikeAttention(nn.Module):
             attn_weights = attn_weights.masked_fill(causal_mask, -10000.0)
 
         if attention_mask is not None:
+            # A mask reaching this point is one of two kinds:
+            #   * multiplicative / "keep" mask: 1 = attend, 0 = ignore  (HF's 2D input mask)
+            #   * additive mask: 0 = attend, large negative = ignore    (what HF hands to
+            #     attention modules, e.g. a [B, 1, tgt, src] float mask with -3.4e38)
+            # Distinguish them by sign, NOT by `max() <= 1`: an additive mask also has
+            # max 0, so that test re-inverted it into (1 - (-3.4e38)) * -1e4 = -inf on
+            # every masked position. Whole rows became -inf and softmax returned NaN, so
+            # any batch containing padding produced NaN logits.
+            is_keep_mask = bool(attention_mask.min() >= 0)
+
             if attention_mask.dim() == 2:
-                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-                extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-                attn_weights = attn_weights + extended_attention_mask
+                # [B, src] -> [B, 1, 1, src]
+                extended_attention_mask = attention_mask[:, None, None, :]
             elif attention_mask.dim() == 3:
-                if attention_mask.size(1) == 1:
-                    extended_attention_mask = attention_mask.unsqueeze(2)
-                else:
-                    extended_attention_mask = attention_mask.unsqueeze(1).transpose(-2, -1)
-                if attention_mask.max() <= 1:
-                    extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-                attn_weights = attn_weights + extended_attention_mask
+                # [B, tgt, src] -> [B, 1, tgt, src]
+                extended_attention_mask = attention_mask[:, None, :, :]
             elif attention_mask.dim() == 4:
-                if attention_mask.max() <= 1:
-                    attention_mask = (1.0 - attention_mask) * -10000.0
-                attn_weights = attn_weights + attention_mask
+                extended_attention_mask = attention_mask
             else:
                 logger.warning(f"Unexpected attention_mask shape: {attention_mask.shape}")
-                attn_weights = attn_weights + attention_mask
+                extended_attention_mask = attention_mask
+
+            if is_keep_mask:
+                extended_attention_mask = (1.0 - extended_attention_mask.to(attn_weights.dtype)) * -10000.0
+            else:
+                extended_attention_mask = extended_attention_mask.to(attn_weights.dtype)
+
+            # Guard against a mask whose key axis disagrees with the score matrix (e.g. a
+            # mask covering only the new tokens while attending over a KV cache).
+            if extended_attention_mask.size(-1) != attn_weights.size(-1):
+                logger.warning(
+                    f"attention_mask key length {extended_attention_mask.size(-1)} != "
+                    f"score length {attn_weights.size(-1)}; ignoring the mask for this step."
+                )
+            else:
+                attn_weights = attn_weights + extended_attention_mask
         
         attn_probs = self.spike_softmax(attn_weights)
         
@@ -280,6 +313,11 @@ class LoihiCausalContextMixer(nn.Module):
 
         # Always return a tuple; the host GPT-2 block does `attn_output = attn_outputs[0]`
         # and `outputs = attn_outputs[1:]`, which breaks on a bare tensor return.
+        # LlamaDecoderLayer instead unpacks exactly three values
+        # (hidden_states, self_attn_weights, present_key_value), so a 2-tuple raised
+        # "ValueError: not enough values to unpack (expected 3, got 2)" on SmolLM2.
+        if getattr(self, "return_mode", "gpt2") == "llama":
+            return output, None, present
         if output_attentions:
             return output, present, None
         return output, present
@@ -593,7 +631,9 @@ class TemporalSpikeProcessor(nn.Module):
         self.T = T
         self.kv_cache = None
         self.max_context_length = max_context_length
-        self.device = next(snn_model.parameters()).device if list(snn_model.parameters()) else "cpu"
+        # NOTE: `device` is a *live* property, not a snapshot. Caching it here meant a
+        # later `.to('cuda')` left it pointing at CPU, and every tensor built from it
+        # (position ids, empty KV placeholders) landed on the wrong device.
         # Initialize dictionary to store batch-specific KV caches
         self.batch_kv_caches = {}
         # Placeholder for last computed position IDs (for testing)
@@ -605,6 +645,15 @@ class TemporalSpikeProcessor(nn.Module):
         self.logit_scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
         # logger.info(f"Created temporal spike processor with T={T}, max_context_length={max_context_length}, device={self.device}")
     
+    @property
+    def device(self):
+        """Device the inner model currently lives on."""
+        for param in self.snn_model.parameters():
+            return param.device
+        for buf in self.snn_model.buffers():
+            return buf.device
+        return torch.device("cpu")
+
     def _max_position_embeddings(self):
         """Positional capacity of the inner model, or None when it has no limit."""
         config = getattr(self.snn_model, 'config', None)
@@ -819,6 +868,23 @@ class TemporalSpikeProcessor(nn.Module):
         # past_length reached the model's max_position_embeddings. The cache must also stay
         # a strict prefix of the current input, otherwise the model is fed only its last
         # token against an unrelated history.
+        # A cache built for a different batch size cannot be reused: concatenating it with
+        # the new keys raised a bare "Sizes of tensors must match except in dimension 2"
+        # from inside attention. Drop it instead.
+        if past_key_values is not None:
+            try:
+                cache_batch = int(past_key_values[0][0].size(0))
+            except Exception:
+                cache_batch = batch_size
+            if cache_batch != batch_size:
+                logger.warning(
+                    f"Discarding KV cache built for batch size {cache_batch}; "
+                    f"this call has batch size {batch_size}."
+                )
+                past_key_values = None
+                if batch_ids is None:
+                    self.kv_cache = None
+
         if past_key_values is not None:
             cache_len = self._cache_length(past_key_values)
             max_cache = min(context_limit - 1, seq_length - 1)
@@ -1239,6 +1305,8 @@ def replace_attention_with_spikeattention(model):
                 num_heads=num_heads,
                 T=model.T if hasattr(model, 'T') else 16,
                 causal=True,
+                # Carry the layer index over so the replacement can update a Cache object.
+                layer_idx=getattr(attn, 'layer_idx', None),
             )
             spike_attn.return_mode = "llama"
             try:
@@ -1584,7 +1652,12 @@ def replace_attention_with_loihi_mixer(model):
             if hidden_size is None:
                 raise RuntimeError("Could not infer hidden_size for Loihi mixer replacement.")
 
-            setattr(parent, child_name, LoihiCausalContextMixer(hidden_size=int(hidden_size)))
+            mixer = LoihiCausalContextMixer(hidden_size=int(hidden_size))
+            # Llama-style decoder layers unpack three values from their attention module;
+            # GPT-2 blocks index the returned tuple. Tell the mixer which layout to emit.
+            if child_name == "self_attn" or 'llama' in model_type or 'mistral' in model_type or 'smollm' in model_type:
+                mixer.return_mode = "llama"
+            setattr(parent, child_name, mixer)
             replaced_prefixes.append(name)
             attn_count += 1
             logger.info(f"Replaced attention at {name} with LoihiCausalContextMixer")

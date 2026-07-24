@@ -643,6 +643,40 @@ def test_position_id_boundaries(model, tokenizer, args):
     logger.info("PASS: test_position_id_boundaries (adapted for SNN wrapper behavior).")
     return True
 
+def test_padded_batch_is_finite(model, tokenizer, args):
+    """
+    A batch containing padding must not produce NaN/inf logits.
+
+    Regression test: SpikeAttention treated HuggingFace's *additive* 4D mask (0 = attend,
+    -3.4e38 = masked) as a 0/1 keep-mask and re-inverted it, turning masked positions into
+    -inf. Entire softmax rows became -inf and every logit came back NaN — so any batched
+    inference with padding silently produced garbage.
+    """
+    logger.info("Running: test_padded_batch_is_finite")
+    device = args.device
+
+    # The model fixture is shared across tests; start from a clean cache.
+    if hasattr(model, 'reset_cache'):
+        model.reset_cache()
+
+    vocab = int(getattr(model.config, 'vocab_size', tokenizer.vocab_size))
+    torch.manual_seed(0)
+    input_ids = torch.randint(0, min(vocab, tokenizer.vocab_size), (2, 10), device=device)
+    attention_mask = torch.ones_like(input_ids)
+    attention_mask[1, :4] = 0  # second sequence is padded
+
+    with torch.no_grad():
+        outputs = model(input_ids, attention_mask=attention_mask)
+
+    logits = outputs.logits
+    assert torch.isfinite(logits).all(), (
+        "Padded batch produced non-finite logits: "
+        f"{int(torch.isnan(logits).sum())} NaN, {int(torch.isinf(logits).sum())} inf"
+    )
+    logger.info("PASS: test_padded_batch_is_finite")
+    return True
+
+
 def test_attention_mask_continuity(model, tokenizer, args):
     """Verify attention mask grows correctly across turns and properly handles edge cases."""
     logger.info("Running: test_attention_mask_continuity")
@@ -1550,6 +1584,18 @@ def main():
         logger.info(f"Loading model: {args.model_name}")
         tokenizer = AutoTokenizer.from_pretrained(args.model_name)
         base_model = AutoModelForCausalLM.from_pretrained(args.model_name)
+
+        # simplified_conversion() rewrites `base_model` IN PLACE (LayerNorm and attention
+        # are swapped on the same object) and returns a wrapper around it. Passing
+        # base_model as the "ANN reference" therefore compared the converted model with
+        # itself, so the fidelity/parity tests measured nothing and always passed. Load a
+        # separate, untouched copy when a parity test is going to run.
+        ann_reference_model = None
+        if args.test_all or args.test_fidelity or args.test_parity_multi_turn:
+            logger.info("Loading a separate unconverted reference model for parity tests")
+            ann_reference_model = AutoModelForCausalLM.from_pretrained(args.model_name)
+            ann_reference_model.eval()
+
         if args.loihi_mode:
             # Marker used by simplified_conversion to swap attention implementation
             base_model._stac_loihi_mode = True
@@ -1642,20 +1688,20 @@ def main():
             energy_success = _run_cli_test("energy consumption", test_energy_consumption, snn_model, tokenizer, args)
             success = success and energy_success
 
-        if args.test_loihi_constraints:
+        if args.test_all or args.test_loihi_constraints:
             loihi_constraints_success = _run_cli_test("Loihi export constraints", test_loihi_constraints, snn_model, args)
             success = success and loihi_constraints_success
 
-        if args.test_tsp_state:
+        if args.test_all or args.test_tsp_state:
             tsp_success = _run_cli_test("TemporalSpikeProcessor state retention", test_tsp_state_retention, snn_model, tokenizer, args)
             success = success and tsp_success
 
-        if args.test_fidelity:
-            fidelity_success = _run_cli_test("ANN<->SNN fidelity parity", test_fidelity_parity, base_model.to(device), snn_model, tokenizer, args)
+        if args.test_all or args.test_fidelity:
+            fidelity_success = _run_cli_test("ANN<->SNN fidelity parity", test_fidelity_parity, ann_reference_model.to(device), snn_model, tokenizer, args)
             success = success and fidelity_success
 
-        if args.test_parity_multi_turn:
-            parity_success = _run_cli_test("ANN<->SNN multi-turn parity", test_multi_turn_parity, base_model.to(device), snn_model, tokenizer, args)
+        if args.test_all or args.test_parity_multi_turn:
+            parity_success = _run_cli_test("ANN<->SNN multi-turn parity", test_multi_turn_parity, ann_reference_model.to(device), snn_model, tokenizer, args)
             success = success and parity_success
         
         # Test mixed precision (if supported)

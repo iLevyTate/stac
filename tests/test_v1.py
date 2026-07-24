@@ -252,6 +252,18 @@ def test_hybrid_finetune_freeze():
     dlpfc_trainable = sum(1 for p in model.dlpfc.parameters() if p.requires_grad)
     assert gpt2_trainable == 0, "GPT-2 backbone should be frozen in hybrid fine-tuning mode"
     assert dlpfc_trainable > 0, "DLPFC should remain trainable in hybrid fine-tuning mode"
+
+    # model.py pins the AdEx reference potentials as non-trainable. A `> 0` count over the
+    # whole DLPFC cannot see them being un-frozen, which is how that regression shipped.
+    for name, module in model.named_modules():
+        if isinstance(module, DLPFCAdExNeuron):
+            for fixed in ("V_th", "V_reset", "V_rest"):
+                param = getattr(module, fixed)
+                assert not param.requires_grad, (
+                    f"{name}.{fixed} must stay non-trainable after hybrid fine-tuning setup"
+                )
+            assert module.tau_m.requires_grad, f"{name}.tau_m should be trainable"
+    print("  Fixed AdEx potentials stayed frozen. OK.")
     print("Hybrid fine-tuning freeze Test PASSED.")
 
 
