@@ -247,7 +247,15 @@ python scripts/run_conversion.py [OPTIONS]
 - `--output_dir`: Output directory
 - `--timesteps`: Number of SNN timesteps
 - `--simplified`: Use simplified conversion
-- `--verify`: Run post-conversion verification
+- `--verify`: Reload the saved weights into the base model and run a forward pass
+- `--quantize`: Load with 8-bit quantization before converting (requires `bitsandbytes`)
+- `--num_samples`: Calibration samples (default 3)
+- `--calibration_batch_size`: Calibration batch size (default 1)
+- `--optimize_for_torchscript`: Also export a TorchScript artifact next to the model
+
+Flags accepted for CLI compatibility but **not applied** by this runner (it warns when
+they are set): `--use_sparse`, `--use_delayed_spikes`, `--use_function_calling`, and
+`--surrogate_function` values other than the default.
 
 ### `tests/test_conversational_snn.py`
 

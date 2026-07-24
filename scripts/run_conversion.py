@@ -64,6 +64,15 @@ def parse_args():
                       help='Skip conversion and only run tests on existing model')
     parser.add_argument('--simplified', action='store_true',
                       help='Use simplified conversion approach without relying on complex SpikingJelly features')
+    # The documented "Full Pipeline Mode" (8-bit quantization + extensive calibration) was
+    # unreachable through this runner: it never forwarded --quantize and hardcoded
+    # --num_samples 3.
+    parser.add_argument('--quantize', action='store_true',
+                      help='Load the model with 8-bit quantization before conversion (requires bitsandbytes)')
+    parser.add_argument('--num_samples', type=int, default=3,
+                      help='Number of calibration samples to pass to convert.py (default: 3)')
+    parser.add_argument('--calibration_batch_size', type=int, default=1,
+                      help='Calibration batch size passed to convert.py (default: 1)')
     return parser.parse_args()
 
 def run_component_tests(model_name="distilgpt2"):
@@ -115,8 +124,11 @@ def run_conversion(args):
             "--timesteps", str(args.timesteps)
         ]
     
-    # Add other arguments
-    cmd.extend(["--num_samples", "3"])  # Small number for quick testing
+    # Forward calibration/quantization options instead of hardcoding a quick-test value.
+    cmd.extend(["--num_samples", str(args.num_samples)])
+    cmd.extend(["--batch_size", str(args.calibration_batch_size)])
+    if args.quantize:
+        cmd.append("--quantize")
     
     logger.info(f"Running conversion: {' '.join(cmd)}")
 
@@ -597,6 +609,9 @@ def main():
         "use_delayed_spikes": args.use_delayed_spikes,
         "use_function_calling": args.use_function_calling,
         "optimize_for_torchscript": args.optimize_for_torchscript,
+        "quantize": args.quantize,
+        "num_samples": args.num_samples,
+        "calibration_batch_size": args.calibration_batch_size,
         "simplified_approach": simplified_used,
         "simplified_forced_by_missing_spikingjelly": use_simplified,
         "conversion_mode": conversion_mode,

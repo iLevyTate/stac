@@ -674,6 +674,18 @@ class TemporalSpikeProcessor(nn.Module):
     """Processes input through SNN model over multiple timesteps."""
     def __init__(self, snn_model, T=16, max_context_length=512):
         super().__init__()
+        # Never nest processors. Wrapping a TemporalSpikeProcessor in another one runs
+        # T x T timestep loops, applies the logit scaling twice, and drives the inner
+        # KV cache out of step with the sequence (observed cache lengths 16, 1, 17, 2 for
+        # a conversation of true lengths 16, 17, 18, 19). Unwrap to the real model
+        # instead — earlier documentation actively encouraged this pattern.
+        if isinstance(snn_model, TemporalSpikeProcessor):
+            logger.warning(
+                "TemporalSpikeProcessor was given another TemporalSpikeProcessor; "
+                "unwrapping it rather than nesting timestep loops."
+            )
+            snn_model = snn_model.snn_model
+
         # Store the model directly - no need for Converter here since
         # simplified_conversion already does the layer replacements
         self.snn_model = snn_model
@@ -805,7 +817,14 @@ class TemporalSpikeProcessor(nn.Module):
         Returns:
             Tensor with accumulated logits
         """
+        if input_ids.dim() != 2:
+            raise ValueError(
+                f"input_ids must be [batch, seq_len]; got shape {tuple(input_ids.shape)}"
+            )
         batch_size, seq_length = input_ids.shape
+        if seq_length == 0:
+            # Previously this failed deep inside a reshape with an opaque message.
+            raise ValueError("input_ids has sequence length 0; nothing to process.")
         # Length the caller asked about. `seq_length` is rebound below when the context
         # is truncated, so keep the original for restoring the output shape at the end.
         original_seq_length = seq_length
@@ -960,6 +979,9 @@ class TemporalSpikeProcessor(nn.Module):
         present_key_values = None
         
         effective_T = max(1, int(self.T))
+        if int(self.T) < 1:
+            # Silently running one timestep for T<=0 hid a misconfigured caller.
+            logger.warning(f"T={self.T} is not a valid timestep count; running with T=1.")
         for _ in range(effective_T):
             # Allow gradients when caller enables them (needed for distillation / adapter finetune).
             # Do not wrap in torch.no_grad(); the caller controls grad mode.
@@ -1754,7 +1776,20 @@ def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
         skip_gelu_replacement: If True, skip GELU->ReLU replacement. This preserves
             text generation quality but sacrifices spike-compatibility. Set to True
             for inference testing; set to False for actual neuromorphic deployment.
+
+    Passing an already-converted model returns it with T updated rather than converting
+    again: re-wrapping nests T x T timestep loops, applies the logit scaling twice, and
+    makes the inner cache grow by T positions per call. It previously failed with a
+    misleading "Could not find compatible attention structure" from the attention pass.
     """
+    if isinstance(model, TemporalSpikeProcessor):
+        logger.warning(
+            "simplified_conversion() received an already-converted TemporalSpikeProcessor; "
+            f"updating T to {timesteps} instead of converting again."
+        )
+        model.T = timesteps
+        return model
+
     logger.info(f"Using simplified conversion with T={timesteps}")
 
     # 1. Optionally replace GELU/NewGELUActivation with ReLU
