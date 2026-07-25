@@ -13,6 +13,8 @@ allocation made by this repository's own code during a forward pass must state i
 explicitly (or use a `*_like` form that inherits one). That invariant is checkable on any
 machine and rules out the entire bug class.
 """
+from __future__ import annotations
+
 import sys
 import traceback
 from pathlib import Path

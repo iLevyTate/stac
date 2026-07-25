@@ -852,9 +852,37 @@ def test_attention_mask_continuity(model, tokenizer, args):
     logger.info("PASS: test_attention_mask_continuity")
     return True
 
+def _uses_random_weight_fixture(args) -> bool:
+    """True when the run is against a generated fixture rather than a trained checkpoint."""
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_stac_make_test_models",
+            Path(__file__).resolve().parents[1] / "scripts" / "make_test_models.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return bool(module.is_random_weight_fixture(getattr(args, "model_name", "")))
+    except Exception:
+        return False
+
+
 def test_multi_turn_coherence(model, tokenizer, args):
     """Validate context retention across conversation turns with specific coherence tests."""
     logger.info("Running: test_multi_turn_coherence")
+
+    # This is the one test here that measures *language quality*: it looks for expected
+    # keywords in generated text. A randomly-initialised fixture cannot produce them, so
+    # asserting on its output would test nothing. Declare the precondition rather than
+    # leaving a permanently red result that trains people to ignore it.
+    if _uses_random_weight_fixture(args):
+        msg = (
+            f"{args.model_name} is a randomly-initialised test fixture; keyword coherence "
+            "requires a trained model (e.g. STAC_TEST_MODEL=distilgpt2)."
+        )
+        logger.warning(f"SKIP: test_multi_turn_coherence — {msg}")
+        pytest.skip(msg)
     device = args.device if hasattr(args, 'device') else ('cuda' if torch.cuda.is_available() else 'cpu')
     max_new_tokens_per_turn = args.max_new_tokens_per_turn if hasattr(args, 'max_new_tokens_per_turn') else 20 # Default
 
