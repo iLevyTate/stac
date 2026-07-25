@@ -82,12 +82,18 @@ jobs:
       run: |
         python tests/test_v1.py
 
+    - name: Build offline test models
+      # Generates tiny GPT-2 / Llama / GQA-Llama checkpoints locally so the suite does
+      # not depend on huggingface.co being reachable from the runner.
+      run: |
+        python scripts/make_test_models.py --out local/test-models
+
     - name: Run the pytest suite (gating)
       # tests/test_conversational_snn.py used to be uncollectable (its test functions
-      # request fixtures), so this suite never ran in CI. Pin a tiny model so the
-      # conversational tests stay fast.
+      # request fixtures), so this suite never ran in CI. Use the generated model so the
+      # run is fast, deterministic, and independent of the hub.
       env:
-        STAC_TEST_MODEL: sshleifer/tiny-gpt2
+        STAC_TEST_MODEL: local/test-models/tiny-gpt2
       run: |
         python -m pytest tests/ -q
     
