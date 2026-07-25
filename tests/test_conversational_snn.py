@@ -132,6 +132,9 @@ def parse_args(argv=None):
                       help='Minimum top-1 match rate to pass fidelity parity when gate is top1/either (default: 0.50)')
     parser.add_argument('--adapter_dir', type=str, default=None,
                       help='Optional PEFT adapter directory to load into SNN inner model before running parity tests.')
+    parser.add_argument('--real_spiking', action='store_true',
+                      help='Convert with genuine spiking attention (LIF Q/K/V, no softmax). '
+                           'Use with --test_fidelity to measure the quality cost.')
     parser.add_argument('--loihi_mode', action='store_true',
                       help='Enable Loihi-oriented conversion mode (replaces attention with LoihiCausalContextMixer).')
     parser.add_argument('--loihi_quantize', action='store_true',
@@ -205,7 +208,10 @@ def snn_model(args):
     # share state with the ANN reference model.
     base = _load_base_model(args)
     base.T = args.timesteps
-    converted = simplified_conversion(base, args.timesteps, skip_gelu_replacement=True)
+    converted = simplified_conversion(
+        base, args.timesteps, skip_gelu_replacement=True,
+        real_spiking=getattr(args, 'real_spiking', False),
+    )
     converted.eval()
     return converted
 
@@ -1683,7 +1689,10 @@ def main():
 
         logger.info(f"Converting to SNN with T={args.timesteps}")
         base_model.T = args.timesteps
-        snn_model = simplified_conversion(base_model, args.timesteps, skip_gelu_replacement=True)
+        snn_model = simplified_conversion(
+            base_model, args.timesteps, skip_gelu_replacement=True,
+            real_spiking=getattr(args, 'real_spiking', False),
+        )
 
         # simplified_conversion() wraps with the library default (512). Without this the
         # --max_context_length flag only affected the test harness's own bookkeeping and

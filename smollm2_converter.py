@@ -120,12 +120,38 @@ class SpikeSoftmax(nn.Module):
         return torch.softmax(x, dim=self.dim)
 
 class SpikeAttention(nn.Module):
-    """Spiking-compatible self-attention implementation."""
-    def __init__(self, embed_dim, num_heads, T=16, causal=True, layer_idx=None):
+    """
+    Spiking-compatible self-attention.
+
+    Two modes:
+
+    * ``spiking=False`` (default) — Q/K/V stay real-valued and attention is the standard
+      scaled dot-product with softmax. This reproduces the source model's attention to
+      float precision and is what every existing test and CLI path uses.
+    * ``spiking=True`` — Q/K/V are passed through LIF neurons and become binary spike
+      trains, and softmax is dropped. Spike-form Q/K/V are non-negative, so ``(Q Kᵀ) V``
+      is already a valid non-negative similarity; this is the Spikformer-style "spiking
+      self-attention" formulation. Softmax over binary inputs would both destroy the
+      sparsity that makes an SNN cheap and reintroduce a non-neuromorphic primitive.
+
+    Grouped-query attention is supported: ``num_kv_heads`` may be smaller than
+    ``num_heads``, in which case K/V heads are repeated to match Q (the standard
+    ``repeat_kv``). SmolLM2-135M/360M need this.
+    """
+
+    def __init__(self, embed_dim, num_heads, T=16, causal=True, layer_idx=None,
+                 num_kv_heads=None, spiking=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
+        self.num_kv_heads = int(num_kv_heads) if num_kv_heads else num_heads
+        if self.num_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be divisible by num_kv_heads "
+                f"({self.num_kv_heads})"
+            )
+        self.num_kv_groups = self.num_heads // self.num_kv_heads
         self.T = T
         self.causal = causal
         # Controls the return-tuple layout expected by the host transformer block.
@@ -134,19 +160,31 @@ class SpikeAttention(nn.Module):
         # Required to update a transformers Cache object (Llama-style decoders index the
         # cache per layer). Set when replacing an attention module that carries one.
         self.layer_idx = layer_idx
+        self.spiking = bool(spiking)
 
+        kv_dim = self.num_kv_heads * self.head_dim
         self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, kv_dim)
+        self.v_proj = nn.Linear(embed_dim, kv_dim)
         self.o_proj = nn.Linear(embed_dim, embed_dim)
-        
-        # Re-enable spiking dynamics on projected Q / K / V
-        # Using lower thresholds to make neurons more sensitive and generate more spikes
+
+        # Spiking dynamics on projected Q / K / V. Active only when self.spiking is set;
+        # in the default mode these are constructed but unused (a state the Loihi
+        # constraints validator reports honestly).
         self.q_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
         self.k_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
         self.v_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
-        
+
         self.spike_softmax = SpikeSoftmax(T=T, dim=-1)
+
+    @staticmethod
+    def _repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+        """Expand [B, kv_heads, T, D] to [B, kv_heads * n_rep, T, D] (grouped-query)."""
+        if n_rep == 1:
+            return x
+        batch, kv_heads, seq_len, head_dim = x.shape
+        x = x[:, :, None, :, :].expand(batch, kv_heads, n_rep, seq_len, head_dim)
+        return x.reshape(batch, kv_heads * n_rep, seq_len, head_dim)
     
     def forward(self, hidden_states, attention_mask=None, layer_past=None,
                head_mask=None, use_cache=False, output_attentions=False,
@@ -158,8 +196,11 @@ class SpikeAttention(nn.Module):
         v = self.v_proj(hidden_states)
 
         q = q.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
+        # K/V carry num_kv_heads, which is smaller than num_heads under grouped-query
+        # attention. They are expanded to match Q *after* the cache update, so the cache
+        # stores the compact (un-repeated) form the host model expects.
+        k = k.view(batch_size, seq_length, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_length, self.num_kv_heads, self.head_dim).transpose(1, 2)
 
         # GPT-2 blocks pass the cache as `layer_past`; Llama-style decoders pass it as
         # `past_key_value`, and it may be a transformers Cache object rather than a
@@ -180,17 +221,31 @@ class SpikeAttention(nn.Module):
                 v = torch.cat((past_value, v), dim=-2)
             present = (k, v) if use_cache else None
         
-        # Reset neuron states to handle dynamic input shapes
-        functional.reset_net(self.q_spk)
-        functional.reset_net(self.k_spk) 
-        functional.reset_net(self.v_spk)
-        
-        # For now, skip spiking neurons in attention to preserve text generation quality
-        # Pass Q and K through spiking neurons (disabled for better generation)
-        q_spikes = q  # self.q_spk(q)
-        k_spikes = k  # self.k_spk(k)
-        v_spikes = v  # self.v_spk(v)
-        
+        # Expand grouped K/V heads to match Q. Done after the cache update so the cache
+        # keeps the compact form.
+        k = self._repeat_kv(k, self.num_kv_groups)
+        v = self._repeat_kv(v, self.num_kv_groups)
+
+        if self.spiking:
+            # Membrane state must persist ACROSS the timesteps of one sequence — that is
+            # what makes TemporalSpikeProcessor's T-loop compute something different each
+            # step. Resetting here would restore the old behaviour where every timestep
+            # was identical and the loop was an exact no-op at T x the cost.
+            # TemporalSpikeProcessor.forward calls functional.reset_net(self.snn_model)
+            # once before the loop, which is the correct reset point.
+            q_spikes = self.q_spk(q)
+            k_spikes = self.k_spk(k)
+            v_spikes = self.v_spk(v)
+        else:
+            # Non-spiking (default): reset so leftover membrane state cannot leak between
+            # calls, and use the real-valued projections directly.
+            functional.reset_net(self.q_spk)
+            functional.reset_net(self.k_spk)
+            functional.reset_net(self.v_spk)
+            q_spikes = q
+            k_spikes = k
+            v_spikes = v
+
         attn_weights = torch.matmul(q_spikes, k_spikes.transpose(-1, -2)) / (self.head_dim ** 0.5)
 
         # Always enforce causal masking when this is a causal attention layer.
@@ -245,11 +300,23 @@ class SpikeAttention(nn.Module):
             else:
                 attn_weights = attn_weights + extended_attention_mask
         
-        attn_probs = self.spike_softmax(attn_weights)
-        
+        if self.spiking:
+            # Spikformer-style spiking self-attention: no softmax. Binary spike-form Q/K
+            # give a non-negative similarity already, and softmax would both destroy the
+            # sparsity an SNN depends on and reintroduce a primitive with no neuromorphic
+            # implementation. Masked positions were filled with a large negative value
+            # above, so clamp them away rather than letting them contribute.
+            attn_probs = attn_weights.clamp(min=0.0)
+            # Normalise by the number of attended positions so the scale stays comparable
+            # across sequence lengths (softmax otherwise provided this).
+            denom = (attn_probs > 0).to(attn_probs.dtype).sum(dim=-1, keepdim=True).clamp(min=1.0)
+            attn_probs = attn_probs / denom
+        else:
+            attn_probs = self.spike_softmax(attn_weights)
+
         if head_mask is not None:
             attn_probs = attn_probs * head_mask
-        
+
         context = torch.matmul(attn_probs, v_spikes)
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_length, self.embed_dim)
         output = self.o_proj(context)
@@ -1229,6 +1296,10 @@ def parse_args():
                         help='Device to use for conversion')
     parser.add_argument('--max_context_length', type=int, default=512,
                         help='Maximum context length for the model')
+    parser.add_argument('--real_spiking', action='store_true',
+                        help='Route Q/K/V through LIF neurons and drop softmax in SpikeAttention, '
+                             'so the model performs actual spiking computation and the T-timestep '
+                             'loop is no longer a no-op. Changes the outputs; measure the cost.')
     parser.add_argument('--calibrate_timesteps', action='store_true',
                         help='After conversion, halve T and rescale LIF thresholds accordingly. '
                              'Off by default so --timesteps is honoured exactly.')
@@ -1415,9 +1486,16 @@ def replace_layernorm_with_spikelayernorm(model):
         logger.info(f"Replaced {ln_count} LayerNorm modules with SpikeLayerNorm")
     return model
 
-def replace_attention_with_spikeattention(model):
-    """Replace self-attention mechanisms with spike-compatible versions."""
-    logger.info("Replacing attention blocks with SpikeAttention")
+def replace_attention_with_spikeattention(model, spiking=False):
+    """
+    Replace self-attention mechanisms with spike-compatible versions.
+
+    `spiking=True` routes Q/K/V through LIF neurons and drops softmax (see
+    SpikeAttention). Default False keeps the numerically faithful path.
+    """
+    logger.info(
+        f"Replacing attention blocks with SpikeAttention (spiking={'on' if spiking else 'off'})"
+    )
     attn_count = 0
     
     # Detect model architecture type for appropriate attention handling
@@ -1439,12 +1517,9 @@ def replace_attention_with_spikeattention(model):
         num_kv_heads = getattr(model.config, 'num_key_value_heads', num_heads)
 
         if num_kv_heads != num_heads:
-            # Grouped-query attention: q_proj and k/v_proj have different output dims and
-            # SpikeAttention assumes full multi-head (q==kv heads). Refuse honestly rather
-            # than silently copying mismatched weights.
-            raise NotImplementedError(
-                f"Grouped-query attention (num_key_value_heads={num_kv_heads} != "
-                f"num_attention_heads={num_heads}) is not supported by SpikeAttention yet."
+            logger.info(
+                f"Grouped-query attention: {num_heads} query heads, {num_kv_heads} key/value "
+                "heads. K/V are repeated to match Q inside SpikeAttention."
             )
 
         logger.warning(
@@ -1464,6 +1539,8 @@ def replace_attention_with_spikeattention(model):
                 causal=True,
                 # Carry the layer index over so the replacement can update a Cache object.
                 layer_idx=getattr(attn, 'layer_idx', None),
+                num_kv_heads=num_kv_heads,
+                spiking=spiking,
             )
             spike_attn.return_mode = "llama"
             try:
@@ -1509,7 +1586,8 @@ def replace_attention_with_spikeattention(model):
                         embed_dim=hidden_size,
                         num_heads=num_heads,
                         T=model.T if hasattr(model, 'T') else 16,
-                        causal=True
+                        causal=True,
+                        spiking=spiking,
                     )
                     
                     # Store original weights for initialization
@@ -1683,7 +1761,8 @@ def replace_attention_with_spikeattention(model):
                             embed_dim=hidden_size,
                             num_heads=num_heads,
                             T=model.T if hasattr(model, 'T') else 16,
-                            causal=False  # BERT uses bidirectional attention
+                            causal=False,  # BERT uses bidirectional attention
+                            spiking=spiking,
                         )
                         
                         try:
@@ -1830,7 +1909,7 @@ def replace_attention_with_loihi_mixer(model):
     logger.info(f"Replaced {attn_count} attention blocks with LoihiCausalContextMixer")
     return model
 
-def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
+def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False, real_spiking=False):
     """Perform simplified conversion without relying on SpikingJelly.
 
     Args:
@@ -1839,6 +1918,11 @@ def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
         skip_gelu_replacement: If True, skip GELU->ReLU replacement. This preserves
             text generation quality but sacrifices spike-compatibility. Set to True
             for inference testing; set to False for actual neuromorphic deployment.
+        real_spiking: If True, SpikeAttention routes Q/K/V through its LIF neurons and
+            drops softmax, so the model performs actual spiking computation and the
+            T-timestep loop stops being a no-op. Off by default: it changes the model's
+            outputs, and the cost should be measured (see spike_metrics.py and the
+            three-way fidelity comparison) before relying on it.
 
     Passing an already-converted model returns it with T updated rather than converting
     again: re-wrapping nests T x T timestep loops, applies the logit scaling twice, and
@@ -1886,7 +1970,7 @@ def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
             logger.info("Loihi quantize enabled: applying fake int8 quantization pass")
             model = apply_fake_int8_quantization_for_loihi(model)
     else:
-        model = replace_attention_with_spikeattention(model)
+        model = replace_attention_with_spikeattention(model, spiking=real_spiking)
     
     # 5. Add a wrapper for temporal processing
     model = TemporalSpikeProcessor(model, T=timesteps)
@@ -2145,7 +2229,9 @@ def main():
 
     logger.info(f"Converting to SNN components with T={args.timesteps} (simplified_conversion wrapper)...")
     # simplified_conversion prepares the model by replacing layers, sets model.T
-    snn_parts_model = simplified_conversion(model_for_snn, args.timesteps)
+    snn_parts_model = simplified_conversion(
+        model_for_snn, args.timesteps, real_spiking=getattr(args, 'real_spiking', False)
+    )
 
     logger.info("Applying surrogate gradients using official SpikingJelly ATan...")
     snn_parts_model = apply_surrogate_gradients(snn_parts_model, alpha=4.0)

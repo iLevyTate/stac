@@ -128,30 +128,32 @@ def _is_stateful_spiking_neuron(module: Any) -> bool:
 
 def _count_invoked_spiking_neurons(
     model: torch.nn.Module,
-    neuron_names: List[str],
+    neuron_modules: List[torch.nn.Module],
     sample_input: torch.Tensor,
 ) -> Optional[int]:
     """
-    Run one forward pass and count how many of `neuron_names` were actually invoked.
+    Run one forward pass and count how many of `neuron_modules` were actually invoked.
 
     Presence in the module tree is not participation: a model can construct spiking
     neurons and then bypass them in forward(), which no static check can see.
+
+    Hooks are attached to the module objects directly. Resolving them by *name* does not
+    work here: the names are collected from the unwrapped inner model
+    ("transformer.h.0.attn.q_spk") while the forward pass runs on the wrapper, whose
+    namespace prefixes them ("snn_model.transformer.h.0.attn.q_spk"). Name matching
+    therefore hooked nothing and this always returned 0, regardless of the model.
+
     Returns None if the forward pass could not be run.
     """
     invoked = set()
     handles = []
-    name_by_module = {}
-    for name, module in model.named_modules():
-        if name in neuron_names:
-            name_by_module[id(module)] = name
 
     def _hook(mod, _inp, _out):
-        invoked.add(name_by_module.get(id(mod)))
+        invoked.add(id(mod))
 
     try:
-        for name, module in model.named_modules():
-            if name in neuron_names:
-                handles.append(module.register_forward_hook(_hook))
+        for module in neuron_modules:
+            handles.append(module.register_forward_hook(_hook))
         was_training = model.training
         model.eval()
         with torch.no_grad():
@@ -163,7 +165,7 @@ def _count_invoked_spiking_neurons(
     finally:
         for h in handles:
             h.remove()
-    return len(invoked - {None})
+    return len(invoked)
 
 
 def _is_embedding_weight(name: str) -> bool:
@@ -223,12 +225,14 @@ def validate_loihi_export_readiness(
     # *named* like spiking components, and which are actual stateful spiking neurons.
     name_matched = []
     real_neurons = []
+    real_neuron_modules = []
     for _n, m in inner.named_modules():
         cn = _safe_class_name(m)
         if "LIF" in cn or "IFNode" in cn or "Spike" in cn or "AdEx" in cn:
             name_matched.append(_n)
         if _is_stateful_spiking_neuron(m):
             real_neurons.append(_n)
+            real_neuron_modules.append(m)
 
     if require_spiking_neurons and not real_neurons:
         findings.append(Finding(
@@ -259,7 +263,7 @@ def validate_loihi_export_readiness(
 
     # Are those neurons actually on the forward path?
     if real_neurons and sample_input is not None:
-        invoked = _count_invoked_spiking_neurons(model, real_neurons, sample_input)
+        invoked = _count_invoked_spiking_neurons(model, real_neuron_modules, sample_input)
         if invoked is None:
             findings.append(Finding(
                 id="spiking_participation_unknown",
