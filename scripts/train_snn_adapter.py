@@ -193,7 +193,9 @@ def main() -> int:
             loss = F.mse_loss(s_logits_use, t_logits_use)
         elif args.loss_type == "ce_teacher":
             # Hard distillation to improve top-1 agreement: cross-entropy to teacher argmax labels.
-            # Use last token only unless overridden by last_token_only flag.
+            # Operates on whatever `--last_token_only` selected above: all positions by
+            # default, or only each sequence's last real token when the flag is set.
+            # (The comment here previously stated the inverse.)
             labels = torch.argmax(t_logits_use.detach(), dim=-1)
             # Flatten (B,S,V) -> (B*S,V)
             loss = F.cross_entropy(

@@ -177,6 +177,37 @@ def run_conversion(args):
 
     return conversion_success
 
+def _load_snn_bundle(model_path):
+    """
+    Load a saved bundle, preferring the safe (weights_only=True) path.
+
+    The previous code registered an `add_safe_globals` allowlist and then loaded with
+    `weights_only=False`, which ignores the allowlist entirely — so the block was a no-op.
+    It also allowlisted GPT2LMHeadModel, while the pickled non-tensor object in the bundle
+    is the *config*. Allowlist the config classes and actually attempt the safe load,
+    falling back only when that genuinely fails.
+    """
+    try:
+        from torch.serialization import add_safe_globals
+        from transformers.configuration_utils import PretrainedConfig
+        from transformers.models.gpt2.configuration_gpt2 import GPT2Config
+        add_safe_globals([PretrainedConfig, GPT2Config])
+    except ImportError:
+        logger.debug("add_safe_globals unavailable; will load with weights_only=False")
+
+    try:
+        return torch.load(model_path, map_location='cpu', weights_only=True)
+    except TypeError:
+        # PyTorch older than the weights_only parameter.
+        return torch.load(model_path, map_location='cpu')
+    except Exception as e:
+        logger.warning(
+            f"Safe load (weights_only=True) failed ({type(e).__name__}); "
+            "falling back to weights_only=False. Only do this for artifacts you trust."
+        )
+        return torch.load(model_path, map_location='cpu', weights_only=False)
+
+
 def rebuild_model_from_bundle(output_dir):
     """
     Reconstruct a live nn.Module from the saved {state_dict, metadata} bundle.
@@ -193,7 +224,7 @@ def rebuild_model_from_bundle(output_dir):
         logger.error(f"✗ {model_path} does not exist")
         return None
 
-    snn_data = torch.load(model_path, map_location='cpu', weights_only=False)
+    snn_data = _load_snn_bundle(model_path)
     if not (isinstance(snn_data, dict) and "state_dict" in snn_data):
         # Already a live module (older artifacts).
         return snn_data
@@ -278,26 +309,7 @@ def test_converted_model(output_dir):
     # Try to load the model directly
     try:
         logger.info(f"Loading model from {model_path}...")
-        # First try to import transformers module to ensure it's available for loading
-        try:
-            import transformers
-            # Add necessary classes to safe globals if available
-            try:
-                from torch.serialization import add_safe_globals
-                from transformers.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
-                add_safe_globals([GPT2LMHeadModel])
-                logger.info("Added transformers classes to safe globals")
-            except ImportError:
-                logger.info("torch.serialization.add_safe_globals not available, will try weights_only=False")
-        except ImportError:
-            logger.info("transformers module not imported, might affect model loading")
-        
-        # Try to load with weights_only=False (needed for PyTorch 2.6+)
-        try:
-            snn_data = torch.load(model_path, map_location='cpu', weights_only=False)
-        except TypeError:
-            # Older PyTorch versions don't have weights_only parameter
-            snn_data = torch.load(model_path, map_location='cpu')
+        snn_data = _load_snn_bundle(model_path)
         
         # Check if the loaded data is a dictionary (new format) or a model
         if isinstance(snn_data, dict) and "state_dict" in snn_data:

@@ -10,7 +10,6 @@ Provides cross-version compatibility for SpikingJelly components.
 """
 import importlib.metadata
 import logging
-from packaging.version import parse
 import torch
 
 _logger = logging.getLogger(__name__)
@@ -25,16 +24,20 @@ def get_neuron():
     return LIFNode
 
 def get_converter():
-    # Use a proper version comparison; string comparison is lexicographic and
-    # would order e.g. "0.0.0.0.9" after "0.0.0.0.14".
-    if parse(SJ_VERSION) >= parse("0.0.0.0.14"):
-        try:
-            from spikingjelly.activation_based.conversion import Converter
-            return Converter
-        except ImportError:
-            from spikingjelly.activation_based.ann2snn import Converter
-            return Converter
-    else:
+    """
+    Return SpikingJelly's ann2snn Converter class.
+
+    The previous implementation gated on `SJ_VERSION >= 0.0.0.0.14` and tried
+    `spikingjelly.activation_based.conversion` first. That module does not exist in any
+    released SpikingJelly, so both branches of the version check resolved to the same
+    `ann2snn.Converter` — the gate never selected anything. The import is still attempted
+    (harmlessly) in case a future release moves the class, but there is no dead version
+    branch pretending to choose between two implementations.
+    """
+    try:
+        from spikingjelly.activation_based.conversion import Converter  # newer layout, if it ever lands
+        return Converter
+    except ImportError:
         from spikingjelly.activation_based.ann2snn import Converter
         return Converter
 

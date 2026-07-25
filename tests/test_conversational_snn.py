@@ -1075,6 +1075,19 @@ def test_energy_consumption(model, tokenizer, args):
         activities.append(torch.profiler.ProfilerActivity.CUDA)
         logger.info("CUDA profiling enabled")
 
+    # Warm up the profiler itself and discard the result. The warmup loop above runs the
+    # models but not the profiler, so its one-time setup cost landed entirely on the first
+    # measured sequence length — that length intermittently reported ~7x the ANN cost
+    # while the other two sat near 2.5x, failing the test at random.
+    try:
+        with torch.profiler.profile(activities=activities, record_shapes=True,
+                                    profile_memory=True, with_stack=True):
+            with torch.no_grad():
+                ann_model(*test_inputs[0][:1], attention_mask=test_inputs[0][1])
+                snn_model(*test_inputs[0][:1], attention_mask=test_inputs[0][1])
+    except Exception as e:
+        logger.warning(f"Profiler warmup failed (continuing): {e}")
+
     # Track metrics for all test sequences
     ann_metrics = {length: {} for length in test_lengths}
     snn_metrics = {length: {} for length in test_lengths}

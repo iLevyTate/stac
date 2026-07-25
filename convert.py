@@ -136,9 +136,34 @@ def create_calibration_data(tokenizer: AutoTokenizer, num_samples: int = 10, max
     
     return inputs
 
+# Smooth activations an ANN->SNN conversion must replace with ReLU. Matching only GELU
+# meant this pass replaced nothing on Llama-family models (SmolLM2 uses SiLU), so
+# `--simplified` was close to a no-op there while still reporting success.
+SMOOTH_ACTIVATION_CLASS_NAMES = (
+    "GELU", "GELUActivation", "NewGELUActivation", "FastGELUActivation", "QuickGELUActivation",
+    "SiLU", "SiLUActivation", "SwishActivation",
+)
+
+
 # Attribute used to record how a model was actually converted, so the saved metadata
 # reports the truth even when the full conversion silently fell back.
 CONVERSION_MODE_ATTR = "_stac_conversion_mode"
+
+
+def _log_activation_replacement(model: torch.nn.Module, replaced: int) -> None:
+    """Report what the activation substitution actually did."""
+    if replaced:
+        logger.info(f"Replaced {replaced} smooth activation module(s) with ReLU")
+        return
+    present = sorted({
+        type(m).__name__ for _n, m in model.named_modules()
+        if "Act" in type(m).__name__ or type(m).__name__ in ("SiLU", "GELU", "ReLU", "Tanh")
+    })
+    logger.warning(
+        "No smooth activation modules were replaced. Activation modules present: "
+        f"{present or 'none (activation may be applied functionally)'}. "
+        "The model's activations are unchanged."
+    )
 
 
 def _mark_simplified_fallback(model: torch.nn.Module) -> torch.nn.Module:
@@ -157,9 +182,10 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
     logger.info("Running SpikeZIP-TF conversion...")
     
     # Step 1: Replace GeLU with ReLU in-place (SNN-friendly activation)
-    logger.info("Replacing GeLU with ReLU...")
+    logger.info("Replacing smooth activations (GELU/SiLU family) with ReLU...")
+    replaced_activations = 0
     for name, mod in list(model.named_modules()):
-        if mod.__class__.__name__ not in ("GELU", "GELUActivation", "NewGELUActivation"):
+        if mod.__class__.__name__ not in SMOOTH_ACTIVATION_CLASS_NAMES:
             continue
         # Swap the activation out on its parent. Reassigning `mod.__class__` in place
         # produced an nn.ReLU instance lacking the `inplace` attribute, which raises
@@ -176,7 +202,9 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
             setattr(model, child_name, torch.nn.ReLU())
         else:
             continue
-        logger.info("Replaced GELU with ReLU")
+        replaced_activations += 1
+
+    _log_activation_replacement(model, replaced_activations)
 
     # Step 2: Insert quantizers for 8-bit precision
     logger.info("Inserting 8-bit quantizers...")
@@ -290,9 +318,10 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
     logger.info("Using simplified conversion approach...")
     
     # 1. Replace GELU with ReLU (SNN friendly)
-    logger.info("Replacing GeLU with ReLU...")
+    logger.info("Replacing smooth activations (GELU/SiLU family) with ReLU...")
+    replaced_activations = 0
     for name, mod in list(model.named_modules()):
-        if mod.__class__.__name__ not in ("GELU", "GELUActivation", "NewGELUActivation"):
+        if mod.__class__.__name__ not in SMOOTH_ACTIVATION_CLASS_NAMES:
             continue
         # Swap the activation out on its parent. Reassigning `mod.__class__` in place
         # produced an nn.ReLU instance lacking the `inplace` attribute, which raises
@@ -309,8 +338,10 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
             setattr(model, child_name, torch.nn.ReLU())
         else:
             continue
-        logger.info("Replaced GELU with ReLU")
+        replaced_activations += 1
     
+    _log_activation_replacement(model, replaced_activations)
+
     # 2. Add SNN-specific attributes
     setattr(model, 'T', timesteps)  # Store timesteps in the model
     

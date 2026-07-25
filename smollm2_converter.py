@@ -338,7 +338,11 @@ def _fake_int8_quantize_tensor(w: torch.Tensor) -> Tuple[torch.Tensor, torch.Ten
         max_abs = float(w_fp32.abs().max().item()) if w_fp32.numel() > 0 else 0.0
         scale = max(max_abs / 127.0, 1e-8)
         q = torch.clamp(torch.round(w_fp32 / scale), -127, 127).to(torch.int8)
-        return q, torch.tensor(scale, dtype=torch.float32, device=w.device)
+        # Return the scale in the ORIGINAL weight dtype. It was hardcoded to float32,
+        # so QuantizedEmbedding's "preserve the scale's dtype" logic always resolved to
+        # float32 and silently promoted a quantized fp16/bf16 model — exactly what that
+        # code comments say it avoids.
+        return q, torch.tensor(scale, dtype=w.dtype, device=w.device)
 
 
 class QuantizedLinearLike(nn.Module):
@@ -422,10 +426,13 @@ class QuantizedHashedEmbedding(nn.Module):
         self._stac_fake_quant_bits = 8
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        # Match QuantizedEmbedding: keep the model's dtype instead of forcing float32,
+        # which broke dtype-matched matmuls in a quantized fp16/bf16 model.
+        dtype = self.scale.dtype
         bucket_ids = torch.remainder(input_ids, self.num_buckets)
-        w = self.qweight.to(dtype=torch.float32) * self.scale.to(dtype=torch.float32)
+        w = self.qweight.to(dtype=dtype) * self.scale.to(dtype=dtype)
         out = torch.index_select(w, 0, bucket_ids.view(-1)).view(*bucket_ids.shape, -1)
-        return out.to(dtype=torch.float32)
+        return out
 
 
 def _untie_input_output_embeddings(model: nn.Module, reason: str) -> None:
@@ -494,14 +501,19 @@ def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn
         device = w.device
 
         with torch.no_grad():
-            bucket_w = torch.zeros((nb, hidden), device=device, dtype=w.dtype)
+            # Accumulate in float32: each bucket sums vocab/nb embedding rows, which can
+            # lose precision (or overflow) in fp16. Cast back at the end so a fp16/bf16
+            # model keeps its dtype — dividing an fp16 accumulator by a float32 `counts`
+            # tensor promoted the bucket table, and with it the quantization scale
+            # derived from it, silently making the model float32 again.
+            bucket_w = torch.zeros((nb, hidden), device=device, dtype=torch.float32)
             counts = torch.zeros((nb,), device=device, dtype=torch.float32)
             ids = torch.arange(vocab, device=device)
             buckets = torch.remainder(ids, nb)
-            bucket_w.index_add_(0, buckets, w)
+            bucket_w.index_add_(0, buckets, w.to(dtype=torch.float32))
             counts.index_add_(0, buckets, torch.ones_like(ids, dtype=torch.float32))
             counts = torch.clamp(counts, min=1.0).unsqueeze(1)
-            bucket_w = bucket_w / counts
+            bucket_w = (bucket_w / counts).to(dtype=w.dtype)
 
         # Replace module
         path = name.split(".")
@@ -705,8 +717,13 @@ class TemporalSpikeProcessor(nn.Module):
         # Optional token-cache for incremental (turn-by-turn) usage
         self._token_cache_input_ids = None
         self._token_cache_attention_mask = None
-        # Learnable scalar to align student logit magnitudes with ANN teacher during distillation
-        self.logit_scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+        # Learnable scalar to align student logit magnitudes with ANN teacher during
+        # distillation. Created in the inner model's dtype so wrapping a fp16/bf16 model
+        # does not introduce a lone float32 parameter.
+        _ref = next(snn_model.parameters(), None)
+        self.logit_scale = nn.Parameter(
+            torch.tensor(1.0, dtype=_ref.dtype if _ref is not None else torch.float32)
+        )
         # logger.info(f"Created temporal spike processor with T={T}, max_context_length={max_context_length}, device={self.device}")
     
     @property
@@ -1096,19 +1113,20 @@ class TemporalSpikeProcessor(nn.Module):
         except Exception:
             self._last_position_ids = None
         
-        # Scale accumulated spikes to restore original logit magnitudes
-        # SNN conversion typically reduces magnitudes significantly, so we need strong scaling
+        # Scale accumulated spikes to restore original logit magnitudes.
+        # SNN conversion typically reduces magnitudes significantly, so we need strong scaling.
+        #
+        # `effective_T >= 1`, so the timestep loop above always runs at least once and
+        # always assigns spike_accum. The former `if spike_accum is None:` branch —
+        # which fabricated a zero logit tensor from config.vocab_size — was therefore
+        # unreachable, and would have silently returned all-zero logits if it ever ran.
+        # Fail loudly instead of inventing an output.
         if spike_accum is None:
-            vocab = getattr(self.snn_model.config, "vocab_size", None)
-            if vocab is None:
-                raise RuntimeError("TemporalSpikeProcessor could not produce logits and vocab_size is unknown.")
-            final_logits = torch.zeros(
-                (batch_size, original_seq_length, vocab),
-                device=input_ids.device,
-                dtype=torch.float32,
+            raise RuntimeError(
+                "TemporalSpikeProcessor produced no logits: the timestep loop did not run "
+                f"(T={self.T}, effective_T={effective_T}). This should be impossible."
             )
-        else:
-            final_logits = spike_accum / effective_T  # Normalize accumulated spikes by timestep count
+        final_logits = spike_accum / effective_T  # Normalize accumulated spikes by timestep count
 
         # Apply learnable logit scaling (helps distillation/parity)
         final_logits = final_logits * self.logit_scale.to(dtype=final_logits.dtype)
@@ -1216,20 +1234,28 @@ def parse_args():
                              'Off by default so --timesteps is honoured exactly.')
     return parser.parse_args()
 
-def replace_gelu_with_relu(model):
-    """Replace GeLU activations with ReLU for SNN compatibility."""
-    logger.info("Replacing GeLU activations with ReLU")
-    gelu_count = 0
-    gelu_new_count = 0
+# Smooth activations that an ANN->SNN conversion has to replace with ReLU. GELU covers the
+# GPT-2 family; SiLU/Swish covers Llama-family models such as SmolLM2, which have no GELU
+# at all — so a GELU-only matcher silently replaced nothing on the second architecture this
+# repo advertises, while still reporting a replacement count of 0 as success.
+SMOOTH_ACTIVATION_CLASS_NAMES = {
+    "GELU", "GELUActivation", "NewGELUActivation", "FastGELUActivation", "QuickGELUActivation",
+    "SiLU", "SiLUActivation", "SwishActivation",
+}
 
-    # Replace any GELU-family activation module by swapping it out on its parent.
+
+def replace_smooth_activations_with_relu(model):
+    """Replace GELU/SiLU-family activations with ReLU for SNN compatibility."""
+    logger.info("Replacing smooth activations (GELU/SiLU family) with ReLU")
+    replaced_by_class = {}
+
+    # Replace any smooth activation module by swapping it out on its parent.
     # Iterate over a snapshot so mutating the module tree mid-iteration is safe, and
     # use proper parent-setattr replacement. Reassigning `mod.__class__` in place left
     # a torch.nn.ReLU instance without an `inplace` attribute, which raises
     # AttributeError on the next forward.
-    gelu_class_names = {"GELU", "GELUActivation", "NewGELUActivation", "FastGELUActivation", "QuickGELUActivation"}
     for name, mod in list(model.named_modules()):
-        if mod.__class__.__name__ not in gelu_class_names:
+        if mod.__class__.__name__ not in SMOOTH_ACTIVATION_CLASS_NAMES:
             continue
         path = name.split('.')
         child_name = path[-1]
@@ -1244,17 +1270,34 @@ def replace_gelu_with_relu(model):
         else:
             # Model itself is the activation (unusual); nothing to reparent.
             continue
-        if mod.__class__.__name__ == "NewGELUActivation":
-            gelu_new_count += 1
-        else:
-            gelu_count += 1
+        cls_name = mod.__class__.__name__
+        replaced_by_class[cls_name] = replaced_by_class.get(cls_name, 0) + 1
 
     # Update config if it exists
     if hasattr(model, 'config') and hasattr(model.config, 'activation_function'):
         model.config.activation_function = "relu"
-    
-    logger.info(f"Replaced {gelu_count} GELU and {gelu_new_count} NewGELUActivation modules with ReLU")
+    if hasattr(model, 'config') and hasattr(model.config, 'hidden_act'):
+        model.config.hidden_act = "relu"
+
+    total = sum(replaced_by_class.values())
+    if total == 0:
+        present = sorted({
+            type(m).__name__ for _n, m in model.named_modules()
+            if "Act" in type(m).__name__ or type(m).__name__ in ("SiLU", "GELU", "ReLU", "Tanh")
+        })
+        logger.warning(
+            "No smooth activation modules were replaced. "
+            f"Activation modules present: {present or 'none (activation may be applied functionally)'}. "
+            "The model's activations are unchanged."
+        )
+    else:
+        logger.info(f"Replaced {total} activation module(s) with ReLU: {replaced_by_class}")
     return model
+
+
+def replace_gelu_with_relu(model):
+    """Backwards-compatible alias for :func:`replace_smooth_activations_with_relu`."""
+    return replace_smooth_activations_with_relu(model)
 
 def create_calibration_data(tokenizer, num_samples=10, max_length=128):
     """Create simple calibration data for SNN conversion."""
@@ -1301,6 +1344,24 @@ def create_calibration_data(tokenizer, num_samples=10, max_length=128):
     
     return calib_data_list
 
+def _match_module_dtype_device(new_module: nn.Module, reference: nn.Module) -> nn.Module:
+    """
+    Cast a replacement module to the dtype/device of the module it replaces.
+
+    Replacement modules (SpikeLayerNorm, SpikeAttention, LoihiCausalContextMixer) build
+    their parameters with torch's float32 default, and `Tensor.copy_` keeps the
+    destination dtype. Converting a fp16/bf16 model therefore silently promoted every
+    replaced layer to float32 — doubling the memory of exactly the large models this
+    repo targets.
+    """
+    ref_param = next(reference.parameters(), None)
+    if ref_param is None:
+        ref_param = next(reference.buffers(), None)
+    if ref_param is None:
+        return new_module
+    return new_module.to(device=ref_param.device, dtype=ref_param.dtype)
+
+
 def replace_layernorm_with_spikelayernorm(model):
     """Replace LayerNorm with spike-compatible SpikeLayerNorm."""
     logger.info("Replacing LayerNorm with spike-compatible SpikeLayerNorm")
@@ -1326,6 +1387,8 @@ def replace_layernorm_with_spikelayernorm(model):
             parent_path = '.'.join(path[:-1])
             child_name = path[-1]
             
+            new_ln = _match_module_dtype_device(new_ln, module)
+
             if parent_path:
                 parent = model
                 for attr in parent_path.split('.'):
@@ -1420,7 +1483,7 @@ def replace_attention_with_spikeattention(model):
                         dst.bias.data.zero_()
             except Exception as e:
                 logger.warning(f"Error copying Llama attention weights: {e}. Using default initialization.")
-            layer.self_attn = spike_attn
+            layer.self_attn = _match_module_dtype_device(spike_attn, attn)
             attn_count += 1
 
         if attn_count == 0:
@@ -1593,8 +1656,8 @@ def replace_attention_with_spikeattention(model):
                     except Exception as e:
                         logger.warning(f"Error during attention weight copying: {e}. Using default initialization.")
                     
-                    # Replace the attention block
-                    block.attn = spike_attn
+                    # Replace the attention block, keeping the model's dtype/device.
+                    block.attn = _match_module_dtype_device(spike_attn, block.attn)
                     attn_count += 1
         else:
             logger.warning(f"Model has GPT-style architecture but couldn't find transformer.h structure")
@@ -1751,7 +1814,7 @@ def replace_attention_with_loihi_mixer(model):
             # GPT-2 blocks index the returned tuple. Tell the mixer which layout to emit.
             if child_name == "self_attn" or 'llama' in model_type or 'mistral' in model_type or 'smollm' in model_type:
                 mixer.return_mode = "llama"
-            setattr(parent, child_name, mixer)
+            setattr(parent, child_name, _match_module_dtype_device(mixer, module))
             replaced_prefixes.append(name)
             attn_count += 1
             logger.info(f"Replaced attention at {name} with LoihiCausalContextMixer")
