@@ -16,11 +16,30 @@ from stac_v1.model import AdExParams, DLPFCAdExNeuron, DLPFCLayer, DLPFCTransfor
 from stac_v1.pipeline import STACV1Config, build_dataloader_from_texts, build_model_and_tokenizer, freeze_for_hybrid_finetune, set_seed, train_steps
 
 
+def _load_make_test_models():
+    """Import scripts/make_test_models.py by path (scripts/ is not a package)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_stac_make_test_models",
+        Path(__file__).resolve().parents[1] / "scripts" / "make_test_models.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+
 print("--- Setting up STAC V1 Tests (imported implementation) ---")
 
 # Allow pointing the suite at a locally available model (a path or another hub id) so it
-# can run without network access to the Hugging Face hub.
-TEST_MODEL_NAME = os.environ.get("STAC_TEST_MODEL", "sshleifer/tiny-gpt2")
+# can run without network access to the Hugging Face hub. When STAC_TEST_MODEL is unset
+# and the hub is unreachable, a tiny model is generated locally — so running this file
+# directly behaves the same offline as running it under pytest.
+try:
+    TEST_MODEL_NAME = _load_make_test_models().resolve_test_model("sshleifer/tiny-gpt2")
+except Exception:
+    TEST_MODEL_NAME = os.environ.get("STAC_TEST_MODEL", "sshleifer/tiny-gpt2")
 
 TEST_CFG = STACV1Config(
     model_name=TEST_MODEL_NAME,

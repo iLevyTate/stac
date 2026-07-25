@@ -136,6 +136,48 @@ def ensure_test_model(name: str = "tiny-gpt2", *, out_root: Path | str, seed: in
     return MODEL_BUILDERS[name](out_dir, seed=seed)
 
 
+def hub_reachable(timeout: float = 3.0) -> bool:
+    """Cheap probe for Hugging Face hub availability."""
+    import os
+    import socket
+    import urllib.error
+    import urllib.request
+
+    if os.environ.get("HF_HUB_OFFLINE") == "1":
+        return False
+    try:
+        urllib.request.urlopen("https://huggingface.co/api/models/gpt2", timeout=timeout)
+        return True
+    except (urllib.error.URLError, socket.timeout, OSError):
+        return False
+
+
+def resolve_test_model(default: str, *, name: str = "tiny-gpt2",
+                       out_root: Path | str | None = None) -> str:
+    """
+    Decide which model a test suite should use.
+
+    Order: an explicit STAC_TEST_MODEL, then `default` if the hub is reachable, then a
+    locally generated model. Shared by tests/conftest.py and the standalone test runners
+    so `python tests/test_v1.py` behaves the same offline as `pytest` does.
+    """
+    import os
+
+    configured = os.environ.get("STAC_TEST_MODEL")
+    if configured:
+        return configured
+    if hub_reachable():
+        return default
+
+    root = Path(out_root) if out_root else Path(__file__).resolve().parents[1] / "local" / "test-models"
+    try:
+        path = str(ensure_test_model(name, out_root=root))
+    except Exception:
+        return default  # let the caller fail with its own message
+    os.environ.setdefault("STAC_TEST_MODEL", path)
+    return path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build tiny local models for offline testing")
     parser.add_argument("--out", default="local/test-models", help="Output root directory")
