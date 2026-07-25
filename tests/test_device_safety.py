@@ -15,6 +15,7 @@ machine and rules out the entire bug class.
 """
 from __future__ import annotations
 
+import importlib.util
 import sys
 import traceback
 from pathlib import Path
@@ -26,7 +27,31 @@ sys.path.insert(0, str(_REPO_ROOT))
 import pytest
 import torch
 
-from tests.test_spiking import _convert, _model_path  # shared offline-model helpers
+
+def _load_offline_helpers():
+    """
+    Load tests/_offline_models.py by path.
+
+    Not `from tests._offline_models import ...`: whether `tests` is importable as a
+    package depends on pytest's import mode and rootdir detection, and CI proved it is
+    not (ModuleNotFoundError on a cross-import that resolved fine locally). A path load
+    works regardless of how the suite is invoked.
+    """
+    name = "_stac_offline_models"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).resolve().parent / "_offline_models.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_offline = _load_offline_helpers()
+_model_path = _offline.model_path
+_convert = _offline.convert
 
 # Allocation functions that place a tensor on a device of their own choosing. The
 # `*_like` variants are deliberately absent: they inherit device and dtype from their

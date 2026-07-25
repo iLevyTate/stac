@@ -10,7 +10,7 @@ silently broken:
 
 Everything here runs offline against generated models (see scripts/make_test_models.py).
 """
-import os
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -21,53 +21,35 @@ import pytest
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 
-from smollm2_converter import SpikeAttention, simplified_conversion
+from smollm2_converter import SpikeAttention
 from loihi_constraints import validate_loihi_export_readiness
 from spike_metrics import measure_spikes
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_GENERATED_MODELS = _REPO_ROOT / "local" / "test-models"
 
-
-def _model_path(name: str) -> str:
+def _load_offline_helpers():
     """
-    Locate a test model, generating the offline fixtures if needed.
+    Load tests/_offline_models.py by path.
 
-    `tiny-gpt2` honours STAC_TEST_MODEL so the suite can be pointed at a real checkpoint;
-    the Llama variants are architecture-specific and always come from the generator.
+    Not `from tests._offline_models import ...`: whether `tests` is importable as a
+    package depends on pytest's import mode and rootdir detection, and CI proved it is
+    not (ModuleNotFoundError on a cross-import that resolved fine locally). A path load
+    works regardless of how the suite is invoked.
     """
-    if name == "tiny-gpt2":
-        configured = os.environ.get("STAC_TEST_MODEL")
-        if configured:
-            return configured
-
-    path = _GENERATED_MODELS / name
-    if not (path / "config.json").exists():
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "_stac_make_test_models", _REPO_ROOT / "scripts" / "make_test_models.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        try:
-            path = module.ensure_test_model(name, out_root=_GENERATED_MODELS)
-        except Exception as e:
-            pytest.skip(f"Could not generate test model {name!r}: {e}")
-    return str(path)
-
-
-def _convert(name: str, *, timesteps: int, real_spiking: bool):
-    try:
-        model = AutoModelForCausalLM.from_pretrained(_model_path(name))
-    except Exception as e:
-        pytest.skip(f"Could not load {name!r}: {e}")
-    model.eval()
-    converted = simplified_conversion(
-        model, timesteps, skip_gelu_replacement=True, real_spiking=real_spiking
+    name = "_stac_offline_models"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).resolve().parent / "_offline_models.py"
     )
-    converted.eval()
-    return converted
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_offline = _load_offline_helpers()
+_model_path = _offline.model_path
+_convert = _offline.convert
 
 
 def test_spiking_mode_invokes_its_neurons():
