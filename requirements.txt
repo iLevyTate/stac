@@ -29,6 +29,7 @@ pytest>=7.0.0
 # install hint if missing):
 # lava-dl                      # Intel Loihi export (EXPORT_LOIHI=1); provides lava.lib.dl.slayer
 # pypdf>=4.0.0                 # scripts/_extract_stac_snippets.py
+# datasets>=2.14.0             # scripts/run_stac_v1.py --dataset wikitext2
 
 # Optional utilities — not imported by the current code paths. Uncomment if you need them:
 # scikit-learn>=1.2.0,<1.6.0   # extra ML utilities

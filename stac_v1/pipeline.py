@@ -148,6 +148,35 @@ def build_dataloader_from_texts(
     return DataLoader(tokenized, batch_size=int(batch_size), shuffle=bool(shuffle))
 
 
+def load_wikitext2_texts(split: str = "train", limit: Optional[int] = 2000) -> List[str]:
+    """
+    Load WikiText-2 lines via the optional `datasets` package.
+
+    Both READMEs described STAC V1 as trained on WikiText-2, but no dataset loading
+    existed anywhere: the pipeline only ever saw four hardcoded sentences. This makes the
+    claim executable. `datasets` stays optional — callers fall back to local texts.
+
+    Raises ImportError if `datasets` is absent, or RuntimeError if the download fails
+    (e.g. no network), so the caller can decide what to do.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError as e:
+        raise ImportError(
+            "WikiText-2 requires the optional `datasets` package: pip install datasets"
+        ) from e
+
+    try:
+        dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split=split)
+    except Exception as e:
+        raise RuntimeError(f"Could not load WikiText-2 ({e}). Falling back is the caller's choice.") from e
+
+    texts = [line.strip() for line in dataset["text"] if line and line.strip()]
+    if limit:
+        texts = texts[: int(limit)]
+    return texts
+
+
 def _atomic_write_json(path: Path, data: Dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")

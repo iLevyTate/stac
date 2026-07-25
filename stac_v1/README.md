@@ -40,11 +40,13 @@ STAC V1 represents the **original research approach** - a complete end-to-end tr
 - AdEx neurons with learnable parameters (τ_m=20.0, τ_w=144.0, etc.)
 - HEMM with 1024-dim projection matrix
 - L1 regularization for energy efficiency
-- Surrogate gradient training on WikiText-2
+- Surrogate gradient training (`--dataset wikitext2` when the optional `datasets`
+  package is installed; built-in sample texts otherwise)
 ```
 
 ### Training Process
-1. **Data Loading**: WikiText-2 raw dataset
+1. **Data Loading**: built-in sample texts, `--texts_file`, or WikiText-2 via
+   `--dataset wikitext2` (needs the optional `datasets` package)
 2. **Model Initialization**: Learnable AdEx parameters
 3. **Forward Pass**: Spike accumulation and memory integration
 4. **Loss Computation**: Cross-entropy + L1 spike penalty
@@ -52,11 +54,18 @@ STAC V1 represents the **original research approach** - a complete end-to-end tr
 
 ## Research Impact
 
-STAC V1 demonstrated several key innovations:
-- ✅ **First successful surrogate gradient training** of spiking transformers
-- ✅ **Learnable neuromorphic dynamics** with AdEx neurons
-- ✅ **Hyperdimensional memory integration** in spiking networks
-- ✅ **Energy-efficient spike regularization** techniques
+> Claims below are limited to what this repository measures. See
+> `docs/baselines/stac_v1_smoke.json` for the numbers and the command that produces them.
+
+STAC V1 implements:
+- **Surrogate-gradient training** of a spiking layer on top of a frozen transformer
+  backbone, end to end
+- **Learnable neuromorphic dynamics** with AdEx neurons (tau_m, tau_w, a, b, delta_T are
+  trained; V_th/V_reset/V_rest stay fixed by design)
+- **Hyperdimensional memory integration** over spike trains, pooled causally
+- **L1 spike regularization**, active at a measured ~0.147 spike rate / 86.8% sparsity
+  (see `docs/baselines/stac_v1_smoke.json`). This term was identically zero until the
+  neurons were made excitable.
 
 ## Usage
 
