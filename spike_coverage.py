@@ -58,12 +58,31 @@ class SpikeLinear(nn.Module):
     used, so the wrapper is agnostic to which.
     """
 
-    def __init__(self, inner: nn.Module, *, threshold: float = 1.0, signed: bool = True):
+    def __init__(self, inner: nn.Module, *, threshold: float = 1.0, signed: bool = True,
+                 tau: float | None = None):
         super().__init__()
-        from spikingjelly.activation_based.neuron import IFNode
+        from spikingjelly.activation_based.neuron import IFNode, LIFNode
 
         self.inner = inner
         self.signed = bool(signed)
+        self.tau = tau
+
+        if tau is not None:
+            # Leaky variant. A no-leak IF integrates any input bias without bound, so its
+            # firing rate creeps upward over a long timestep window. A leak bounds that,
+            # at the cost of systematically under-counting (charge is lost between spikes).
+            # Measured on constant input in [0,1] over T=64, soft reset throughout:
+            #     tau=2    corr 0.929  err 0.501  drift +0.003
+            #     tau=8    corr 0.998  err 0.136  drift +0.018
+            #     tau=32   corr 1.000  err 0.045  drift +0.026
+            #     no leak  corr 1.000  err 0.015  drift +0.031
+            # decay_input=False so the leak acts on the membrane, not on the input current.
+            def make():
+                return LIFNode(tau=float(tau), v_threshold=1.0, v_reset=None,
+                               decay_input=False, detach_reset=True)
+        else:
+            def make():
+                return IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
         # Integrate-and-fire with SOFT reset (`v_reset=None` subtracts the threshold on a
         # spike instead of clearing the membrane). This choice is not cosmetic — it is what
         # makes the rate code work, and it is what ANN->SNN conversion has used since
@@ -76,8 +95,8 @@ class SpikeLinear(nn.Module):
         #     IF,  soft reset:  corr 0.9999, 1.6% err
         #
         # Pinned by tests/test_spike_coverage.py::test_rate_code_converges.
-        self.pos = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
-        self.neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True) if signed else None
+        self.pos = make()
+        self.neg = make() if signed else None
         self.register_buffer("threshold", torch.tensor(float(threshold)))
         # Set while calibrating: pass through unchanged and record input statistics.
         self.calibrating = False
@@ -136,6 +155,7 @@ def apply_spike_coverage(
     components: Sequence[str],
     *,
     signed: bool = True,
+    tau: float | None = None,
 ) -> dict:
     """
     Wrap every linear layer belonging to `components` in a `SpikeLinear`.
@@ -162,7 +182,7 @@ def apply_spike_coverage(
     for name, module, comp in targets:
         parent_path, _, attr = name.rpartition(".")
         parent = model.get_submodule(parent_path) if parent_path else model
-        setattr(parent, attr, SpikeLinear(module, signed=signed))
+        setattr(parent, attr, SpikeLinear(module, signed=signed, tau=tau))
         wrapped[comp] = wrapped.get(comp, 0) + 1
 
     if not wrapped:
@@ -172,7 +192,7 @@ def apply_spike_coverage(
         )
     else:
         logger.info("Wrapped %d layer(s) as spike-driven: %s", len(targets), wrapped)
-    return {"wrapped": wrapped, "total": len(targets), "signed": signed}
+    return {"wrapped": wrapped, "total": len(targets), "signed": signed, "tau": tau}
 
 
 def spike_linears(model: nn.Module) -> Iterable[SpikeLinear]:
