@@ -131,7 +131,18 @@ def count_macs(model: nn.Module, seq_len: int, batch_size: int = 1) -> Dict[str,
     spike_replaceable = 0.0
     for _name, module in model.named_modules():
         cls = type(module).__name__
-        if isinstance(module, nn.Linear):
+        if cls == "SpikeLinear":
+            # spike_coverage.SpikeLinear binarises its input, so the wrapped layer's MACs
+            # become spike-driven accumulates. Only credit the replacement here: the inner
+            # layer is a submodule and named_modules() visits it separately, where it is
+            # added to `total`. Counting it in both places would double the denominator.
+            inner = getattr(module, "inner", None)
+            if isinstance(inner, nn.Linear):
+                spike_replaceable += float(inner.in_features) * inner.out_features * seq_len * batch_size
+            elif type(inner).__name__ == "Conv1D" and hasattr(inner, "weight"):
+                in_f, out_f = inner.weight.shape
+                spike_replaceable += float(in_f) * float(out_f) * seq_len * batch_size
+        elif isinstance(module, nn.Linear):
             total += float(module.in_features) * float(module.out_features) * seq_len * batch_size
         elif cls == "Conv1D" and hasattr(module, "weight"):
             in_f, out_f = module.weight.shape  # Conv1D stores [in, out]
