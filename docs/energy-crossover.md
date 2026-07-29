@@ -89,6 +89,14 @@ the block that is hardest to spike shrinks as a share of total work as models gr
 On SmolLM2-1.7B — the model the paper actually targets — spiking the body reaches 94.29%
 coverage and affords **T ≤ 13**, projecting **1.78× better** than the ANN at T=8.
 
+> **Caveat on the Llama-family rows.** These are operation counts, and they hold as
+> arithmetic. But `SpikeAttention` never applies rotary position embeddings, and every
+> SmolLM2 variant carries its positional information in RoPE, so a converted SmolLM2 has
+> already lost that information before any coverage or timestep argument applies — measured
+> at 19–28× worse perplexity from conversion alone, with spiking switched off. See §4 of
+> [`coverage-quality.md`](coverage-quality.md). The energy economics below describe a model
+> that must be fixed before the economics matter.
+
 **This means the 7.6× worse figure is substantially an artifact of benchmarking on tiny
 models.** A conversion pipeline evaluated on distilgpt2 or tiny-gpt2 structurally
 understates what the same design achieves at 1.7B, because `lm_head` dominates the small
