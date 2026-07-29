@@ -107,6 +107,13 @@ def main() -> int:
     ap.add_argument("--stride", type=int, default=128)
     ap.add_argument("--tau", type=float, default=None, help="leak constant; omit for no leak")
     ap.add_argument("--spiking_attn", action="store_true")
+    ap.add_argument("--reference", choices=["ann", "converted"], default="ann",
+                    help="'ann' compares against the untouched model, so the number includes "
+                         "every cost of conversion. 'converted' compares against the same "
+                         "model after simplified_conversion but WITHOUT spike coverage, "
+                         "isolating the damage spiking alone does. Use 'converted' for "
+                         "Llama-family models, where SpikeAttention drops RoPE and that "
+                         "loss would otherwise be attributed to spiking.")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--json", type=Path)
     args = ap.parse_args()
@@ -116,8 +123,18 @@ def main() -> int:
     tok = AutoTokenizer.from_pretrained(args.model)
     ids = load_tokens(tok, args.max_tokens)
 
-    # Two independent loads: simplified_conversion mutates in place.
-    ann = AutoModelForCausalLM.from_pretrained(args.model).eval().to(args.device)
+    # Independent loads throughout: simplified_conversion mutates in place.
+    if args.reference == "ann":
+        ann = AutoModelForCausalLM.from_pretrained(args.model).eval().to(args.device)
+    else:
+        # Same architectural transforms, no spike coverage. Isolates the cost of spiking
+        # from the cost of conversion (activation swap, RoPE loss, normalisation changes).
+        ref_base = AutoModelForCausalLM.from_pretrained(args.model).eval()
+        ref = simplified_conversion(ref_base, args.timesteps, skip_gelu_replacement=True,
+                                    real_spiking=args.spiking_attn)
+        ann = (ref.snn_model if isinstance(ref, TemporalSpikeProcessor) else ref)
+        ann.eval().to(args.device)
+
     to_convert = AutoModelForCausalLM.from_pretrained(args.model).eval()
 
     snn = simplified_conversion(to_convert, args.timesteps, skip_gelu_replacement=True,
@@ -140,17 +157,21 @@ def main() -> int:
     best_scale = min(SCALES, key=lambda k: ce(s * k))
     scaled_ppl = ppl(s * best_scale)
 
+    ref_label = "ANN" if args.reference == "ann" else "REF"
     print(f"model={args.model}  T={args.timesteps}  tau={args.tau}  "
-          f"spiking_attn={args.spiking_attn}  tokens={int(tgt.numel())}")
+          f"spiking_attn={args.spiking_attn}  reference={args.reference}  "
+          f"tokens={int(tgt.numel())}")
+    if args.reference == "converted":
+        print("  reference = converted-but-not-spiking (isolates spiking from conversion)")
     print("-" * 70)
-    print(f"  ANN logit std                {a.std():.4f}")
+    print(f"  {ref_label} logit std                {a.std():.4f}")
     print(f"  SNN logit std                {s.std():.4f}   (scale ratio {a.std()/s.std():.3f})")
-    print(f"  cosine(ANN, SNN) per token   {cosine:.4f}")
-    print(f"  top-1 agreement with ANN     {agree:.4f}")
-    print(f"  ANN next-token accuracy      {ann_acc:.4f}")
+    print(f"  cosine({ref_label}, SNN) per token   {cosine:.4f}")
+    print(f"  top-1 agreement with {ref_label}     {agree:.4f}")
+    print(f"  {ref_label} next-token accuracy      {ann_acc:.4f}")
     print(f"  SNN next-token accuracy      {snn_acc:.4f}")
     print("-" * 70)
-    print(f"  perplexity  ANN              {ann_ppl:>10.2f}")
+    print(f"  perplexity  {ref_label}              {ann_ppl:>10.2f}")
     print(f"  perplexity  SNN as-is        {snn_ppl:>10.2f}   ({snn_ppl/ann_ppl:.1f}x)")
     print(f"  perplexity  SNN best scale   {scaled_ppl:>10.2f}   ({scaled_ppl/ann_ppl:.1f}x)"
           f"  at scale={best_scale}")
@@ -161,7 +182,7 @@ def main() -> int:
     if args.json:
         args.json.write_text(json.dumps(dict(
             model=args.model, timesteps=args.timesteps, tau=args.tau,
-            spiking_attn=args.spiking_attn, tokens=int(tgt.numel()),
+            spiking_attn=args.spiking_attn, reference=args.reference, tokens=int(tgt.numel()),
             cosine=cosine, top1_agreement=agree, ann_accuracy=ann_acc, snn_accuracy=snn_acc,
             ann_ppl=ann_ppl, snn_ppl=snn_ppl, scaled_ppl=scaled_ppl,
             best_scale=best_scale, gap_closed=recovered), indent=2))
