@@ -137,10 +137,11 @@ This inherits every limitation of `spike_metrics.py` and adds one of its own.
   Excludes memory movement, which is often dominant in practice.
 - **Assumes event-driven hardware** that genuinely skips silent neurons. CPU/GPU simulation
   does not.
-- **Ignores quality.** Extending spike coverage to the MLP and projections is exactly the
-  change most likely to degrade generation, and the repository already has a coherence test
-  failing at 30% against an 80% threshold on real weights. The energy ceiling computed here
-  is an upper bound that says nothing about whether the model still works at that coverage.
-  **That trade-off is the open research question, and this analysis does not answer it.**
+- **Ignores quality.** The energy ceiling computed here is an upper bound that says nothing
+  about whether the model still works at that coverage.
+  [`coverage-quality.md`](coverage-quality.md) measures that, and the answer is that it does
+  not: post-hoc conversion costs at least 41x perplexity at every coverage and timestep
+  count tested. The energy advantage below is reachable; the model that reaches it is not
+  usable without training.
 - **`ρ` is assumed uniform across layers.** Real spike rates vary; the closed form uses a
   single measured mean.
