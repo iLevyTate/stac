@@ -101,7 +101,17 @@ accuracy is 0.0127 throughout. Nothing here suggests a size at which this become
 
 ---
 
-## 4 · A separate, serious defect: conversion discards RoPE
+## 4 · A separate, serious defect: conversion discards RoPE — **fixed**
+
+> **Fix status (2026-07).** Both defects in this section are fixed on this branch.
+> `SpikeAttention` now applies RoPE (host-passed `position_embeddings`, or a carried-over
+> `rotary_emb` for older layouts), and the normalization pass replaces RMSNorm via
+> `SpikeRMSNorm`. Measured after the fix, conversion-only perplexity: SmolLM2-135M
+> 20.79 → 20.79, SmolLM2-360M 15.78 → 15.78 — **1.00× on both**, from 19.0× / 27.6×.
+> Pinned by `tests/test_rope_fidelity.py`. The §3 neuron defect is also fixed:
+> `SpikeAttention` now uses the calibrated signed soft-reset IF encoding, with per-layer
+> Q/K/V thresholds set by `calibrate_spike_attention()`. The measurements below are kept
+> as the record of the pre-fix behaviour.
 
 `SpikeAttention` replaces the attention block wholesale and never applies rotary position
 embeddings. Llama-family models — **every SmolLM2 variant the paper targets** — carry all

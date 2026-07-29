@@ -40,7 +40,8 @@ import torch.nn.functional as F
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
 from spike_coverage import apply_spike_coverage, calibrate_thresholds  # noqa: E402
-from smollm2_converter import TemporalSpikeProcessor, simplified_conversion  # noqa: E402
+from smollm2_converter import (TemporalSpikeProcessor, calibrate_spike_attention,  # noqa: E402
+                                simplified_conversion)
 
 ALL_COMPONENTS = ["mlp", "attn_qkv_proj", "attn_out_proj", "lm_head"]
 SCALES = [0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 5, 8, 12, 20, 35, 60, 100, 200]
@@ -142,7 +143,10 @@ def main() -> int:
     inner = snn.snn_model if isinstance(snn, TemporalSpikeProcessor) else snn
     apply_spike_coverage(inner, ALL_COMPONENTS, signed=True, tau=args.tau)
     snn.eval().to(args.device)
-    calibrate_thresholds(snn, [ids[:args.window].unsqueeze(0).to(args.device)])
+    calib_batch = [ids[:args.window].unsqueeze(0).to(args.device)]
+    calibrate_thresholds(snn, calib_batch)
+    if args.spiking_attn:
+        calibrate_spike_attention(snn, calib_batch)
 
     a, s, tgt = paired_logits(ann, snn, ids, args.window, args.stride, args.timesteps, args.device)
 

@@ -23,6 +23,20 @@ def get_neuron():
     from spikingjelly.activation_based.neuron import LIFNode
     return LIFNode
 
+
+def get_if_neuron():
+    """
+    Integrate-and-fire, for rate coding.
+
+    Distinct from `get_neuron`'s LIF on purpose. Converting an ANN to spikes needs a
+    neuron whose firing rate is proportional to input magnitude, and a *leaky* neuron with
+    hard reset is not one: sub-threshold input decays to a steady state and never fires,
+    while supra-threshold input has its excess discarded on reset. Use this with
+    `v_reset=None` (subtractive reset) wherever a spike train has to carry magnitude.
+    """
+    from spikingjelly.activation_based.neuron import IFNode
+    return IFNode
+
 def get_converter():
     """
     Return SpikingJelly's ann2snn Converter class.

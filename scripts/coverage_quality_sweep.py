@@ -41,17 +41,18 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 
 from spike_coverage import apply_spike_coverage, calibrate_thresholds  # noqa: E402
 from spike_metrics import SpikeCounter  # noqa: E402
-from smollm2_converter import TemporalSpikeProcessor, simplified_conversion  # noqa: E402
+from smollm2_converter import (TemporalSpikeProcessor, calibrate_spike_attention,  # noqa: E402
+                                simplified_conversion)
 
 _ALL = ["mlp", "attn_qkv_proj", "attn_out_proj", "lm_head"]
 
 # (label, components, spiking_attention). components=None means the unconverted ANN.
 #
-# The two families are separated deliberately. `SpikeAttention`'s spiking mode uses a leaky
-# neuron with hard reset at a fixed, uncalibrated threshold of 0.1 -- an encoding that
-# cannot rate-code (see tests/test_spike_coverage.py::test_soft_reset_beats_hard_reset...).
-# Mixing it into every measurement would attribute its damage to coverage. The "dense-attn"
-# rows isolate the calibrated soft-reset IF encoding this module adds.
+# The two families are kept separate so attention-spiking damage cannot be attributed to
+# coverage. Historical note: SpikeAttention originally used a leaky hard-reset neuron at a
+# fixed threshold of 0.1, which cannot rate-code (it 1-bit-quantises at an arbitrary cut);
+# it now uses the same calibrated signed soft-reset IF encoding as SpikeLinear, with
+# thresholds set by calibrate_spike_attention().
 LEVELS = [
     ("ann-baseline",           None,                                        False),
     # existing spiking attention, no added coverage
@@ -177,6 +178,8 @@ def main() -> int:
 
         if info["total"]:
             calibrate_thresholds(model, calib)
+        if spiking:
+            calibrate_spike_attention(model, calib)
 
         ppl = perplexity(model, ids, args.window, args.stride, args.device)
         if baseline_ppl is None:

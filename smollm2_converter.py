@@ -71,12 +71,14 @@ logging.info(f"Using SpikingJelly version: {sj_version}")
 # neuron/surrogate/converter/quantizer components come through the compatibility layer.
 from spikingjelly.activation_based import functional
 # Cannot directly import Quantizer - using compatibility layer
-from spikingjelly_compat import get_neuron, get_converter, get_quantizer, get_surrogate
+from spikingjelly_compat import (get_neuron, get_if_neuron, get_converter,
+                                 get_quantizer, get_surrogate)
 
 
 
 # Get components from compatibility layer
 LIFNode = get_neuron()
+IFNode = get_if_neuron()
 SurrogateModule = get_surrogate()
 Converter = get_converter()
 Quantizer = get_quantizer()
@@ -98,6 +100,34 @@ class SpikeLayerNorm(nn.Module):
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, keepdim=True, unbiased=False)
         return self.weight * (x - mean) / torch.sqrt(var + self.eps) + self.bias
+
+class SpikeRMSNorm(nn.Module):
+    """
+    Spiking-compatible RMS normalization.
+
+    Llama-family models — including every SmolLM2 variant this repo targets — normalise
+    with RMSNorm, not LayerNorm. The LayerNorm pass matched `nn.LayerNorm` only, so
+    "spike-compatible normalization" was silently a no-op on exactly the models the
+    conversion is aimed at.
+
+    RMSNorm rescales by the root-mean-square without subtracting the mean, so unlike
+    LayerNorm it is already sign-preserving and needs no change in form here; this exists
+    so the replacement pass reports honestly and so the module is under STAC's control for
+    later spike-domain work.
+    """
+
+    def __init__(self, hidden_size, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.eps = eps
+
+    def forward(self, x):
+        # Compute in float32: the mean of squares underflows in fp16 for small activations.
+        dtype = x.dtype
+        x32 = x.float()
+        variance = x32.pow(2).mean(-1, keepdim=True)
+        return self.weight * (x32 * torch.rsqrt(variance + self.eps)).to(dtype)
+
 
 # Spike-compatible softmax
 class SpikeSoftmax(nn.Module):
@@ -161,6 +191,9 @@ class SpikeAttention(nn.Module):
         # cache per layer). Set when replacing an attention module that carries one.
         self.layer_idx = layer_idx
         self.spiking = bool(spiking)
+        # Set from the replaced module when the host owns a per-layer rotary embedding
+        # (older Llama layouts). Newer hosts pass precomputed cos/sin down instead.
+        self.rotary_emb = None
 
         kv_dim = self.num_kv_heads * self.head_dim
         self.q_proj = nn.Linear(embed_dim, embed_dim)
@@ -171,11 +204,72 @@ class SpikeAttention(nn.Module):
         # Spiking dynamics on projected Q / K / V. Active only when self.spiking is set;
         # in the default mode these are constructed but unused (a state the Loihi
         # constraints validator reports honestly).
-        self.q_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
-        self.k_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
-        self.v_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
+        #
+        # Integrate-and-fire with SOFT reset, not the leaky hard-reset LIF this used to
+        # build. A leaky neuron with hard reset at a fixed threshold of 0.1 does not
+        # rate-code: it discards everything above threshold, so it behaves as a 1-bit
+        # quantiser at an arbitrary cut point. Measured against realistic Q/K/V (std ~1):
+        #     LIFNode(0.1, hard reset):  corr 0.974 with 1[x > 0.1]
+        #                                corr 0.805 with the actual magnitude
+        #     signed soft-reset IF:      corr 0.989 with the actual magnitude
+        # Inputs are normalised by a calibrated per-layer scale (see `qkv_threshold`), so
+        # the neuron itself keeps a unit threshold and standard dynamics.
+        self.q_spk = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.k_spk = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.v_spk = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.q_spk_neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.k_spk_neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.v_spk_neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        # Q/K/V are signed; a single population silently drops every negative component.
+        # Calibrated by `calibrate_spike_attention`; 1.0 is a neutral default.
+        self.register_buffer("qkv_threshold", torch.ones(3))
 
         self.spike_softmax = SpikeSoftmax(T=T, dim=-1)
+
+    def _encode(self, x, pos_neuron, neg_neuron, slot):
+        """
+        Signed rate code: two opposing populations, normalised by a calibrated scale.
+
+        The scale is multiplied back so the tensor keeps the magnitude of what it encodes;
+        the wire is still binary and on hardware the scale folds into downstream weights.
+        Spike counting in `spike_metrics.py` is unaffected — it hooks the neurons, not this.
+        """
+        threshold = self.qkv_threshold[slot].clamp(min=1e-6)
+        normalised = x / threshold
+        spikes = pos_neuron(normalised.clamp(min=0.0)) - neg_neuron((-normalised).clamp(min=0.0))
+        return spikes * threshold
+
+    def _apply_rope(self, q, k, position_embeddings=None, position_ids=None):
+        """
+        Rotate Q/K by the host model's rotary embeddings, when it has any.
+
+        Returns the inputs untouched for architectures that do not use RoPE (GPT-2), or
+        when the host passes nothing to rotate with. `rotary_emb` is set by
+        `replace_attention_with_spikeattention` from the module being replaced, so this
+        also works on hosts that hand down `position_ids` rather than precomputed cos/sin.
+        """
+        cos = sin = None
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+        elif self.rotary_emb is not None:
+            if position_ids is None:
+                position_ids = torch.arange(
+                    q.shape[-2], device=q.device, dtype=torch.long
+                ).unsqueeze(0)
+            cos, sin = self.rotary_emb(q, position_ids)
+
+        if cos is None:
+            return q, k
+
+        try:
+            from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+        except ImportError:  # pragma: no cover - transformers without Llama
+            logger.warning("Could not import apply_rotary_pos_emb; leaving Q/K unrotated.")
+            return q, k
+
+        cos = cos.to(dtype=q.dtype)
+        sin = sin.to(dtype=q.dtype)
+        return apply_rotary_pos_emb(q, k, cos, sin)
 
     @staticmethod
     def _repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -201,6 +295,19 @@ class SpikeAttention(nn.Module):
         # stores the compact (un-repeated) form the host model expects.
         k = k.view(batch_size, seq_length, self.num_kv_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_length, self.num_kv_heads, self.head_dim).transpose(1, 2)
+
+        # Rotary position embeddings. Llama-family models (every SmolLM2 variant) carry ALL
+        # of their positional information in RoPE — unlike GPT-2, which keeps it in a
+        # learned embedding this conversion never touches. The host decoder layer passes
+        # `position_embeddings` straight through to the attention module, and this module
+        # accepted it via **kwargs and dropped it on the floor: converting SmolLM2 threw
+        # away position entirely, measured at 19-28x worse perplexity with spiking OFF.
+        #
+        # Applied BEFORE the cache update, matching upstream Llama: the cache stores
+        # post-RoPE keys, so rotating after the update would leave cached history unrotated
+        # and re-rotate it on every subsequent step.
+        q, k = self._apply_rope(q, k, kwargs.get("position_embeddings"),
+                                kwargs.get("position_ids"))
 
         # GPT-2 blocks pass the cache as `layer_past`; Llama-style decoders pass it as
         # `past_key_value`, and it may be a transformers Cache object rather than a
@@ -233,15 +340,15 @@ class SpikeAttention(nn.Module):
             # was identical and the loop was an exact no-op at T x the cost.
             # TemporalSpikeProcessor.forward calls functional.reset_net(self.snn_model)
             # once before the loop, which is the correct reset point.
-            q_spikes = self.q_spk(q)
-            k_spikes = self.k_spk(k)
-            v_spikes = self.v_spk(v)
+            q_spikes = self._encode(q, self.q_spk, self.q_spk_neg, 0)
+            k_spikes = self._encode(k, self.k_spk, self.k_spk_neg, 1)
+            v_spikes = self._encode(v, self.v_spk, self.v_spk_neg, 2)
         else:
             # Non-spiking (default): reset so leftover membrane state cannot leak between
             # calls, and use the real-valued projections directly.
-            functional.reset_net(self.q_spk)
-            functional.reset_net(self.k_spk)
-            functional.reset_net(self.v_spk)
+            for neuron in (self.q_spk, self.k_spk, self.v_spk,
+                           self.q_spk_neg, self.k_spk_neg, self.v_spk_neg):
+                functional.reset_net(neuron)
             q_spikes = q
             k_spikes = k
             v_spikes = v
@@ -1433,6 +1540,71 @@ def _match_module_dtype_device(new_module: nn.Module, reference: nn.Module) -> n
     return new_module.to(device=ref_param.device, dtype=ref_param.dtype)
 
 
+@torch.no_grad()
+def calibrate_spike_attention(model, batches):
+    """
+    Set each SpikeAttention's Q/K/V spike thresholds from observed activation magnitude.
+
+    A rate code maps input magnitude onto a firing rate that saturates once the input
+    reaches threshold. A fixed threshold therefore either saturates (every neuron fires
+    every step, carrying nothing) or never fires, depending on how the model's activations
+    happen to be scaled. This is the threshold-balancing step of Diehl et al. (2015).
+
+    Runs with spiking temporarily disabled so statistics come from the real activation
+    distribution rather than an already-degraded one. Returns the number of modules
+    calibrated.
+    """
+    targets = [m for m in model.modules() if isinstance(m, SpikeAttention)]
+    if not targets:
+        return 0
+
+    observed = {id(m): [] for m in targets}
+    handles, saved = [], {}
+
+    for module in targets:
+        saved[id(module)] = module.spiking
+        module.spiking = False
+
+        def make(mod):
+            def capture(_m, _inp, out):
+                # out is (attn_output, ...); recompute Q/K/V magnitudes from the input.
+                hidden = _inp[0]
+                for slot, proj in enumerate((mod.q_proj, mod.k_proj, mod.v_proj)):
+                    flat = proj(hidden).detach().abs().flatten().float()
+                    if flat.numel() > 100_000:
+                        idx = torch.randperm(flat.numel(), device=flat.device)[:100_000]
+                        flat = flat[idx]
+                    if flat.numel():
+                        observed[id(mod)].append((slot, torch.quantile(flat, 0.99).item()))
+            return capture
+
+        handles.append(module.register_forward_hook(make(module)))
+
+    was_training = model.training
+    model.eval()
+    try:
+        for batch in batches:
+            model(batch)
+    finally:
+        for handle in handles:
+            handle.remove()
+        for module in targets:
+            module.spiking = saved[id(module)]
+        if was_training:
+            model.train()
+
+    for module in targets:
+        per_slot = {0: [], 1: [], 2: []}
+        for slot, value in observed[id(module)]:
+            per_slot[slot].append(value)
+        for slot, values in per_slot.items():
+            if values:
+                module.qkv_threshold[slot] = sum(values) / len(values)
+
+    logger.info("Calibrated Q/K/V spike thresholds on %d SpikeAttention module(s)", len(targets))
+    return len(targets)
+
+
 def replace_layernorm_with_spikelayernorm(model):
     """Replace LayerNorm with spike-compatible SpikeLayerNorm."""
     logger.info("Replacing LayerNorm with spike-compatible SpikeLayerNorm")
@@ -1441,17 +1613,33 @@ def replace_layernorm_with_spikelayernorm(model):
     # Find and replace layer norms. Snapshot the module list first so replacing
     # submodules mid-iteration cannot disturb the traversal.
     for name, module in list(model.named_modules()):
-        if isinstance(module, nn.LayerNorm):
-            shape = module.normalized_shape
-            new_ln = SpikeLayerNorm(shape, module.eps)
-
-            # Copy parameters. LayerNorm(elementwise_affine=False) has weight/bias set to
-            # None, which raised "'NoneType' object has no attribute 'data'"; fall back to
-            # the identity affine SpikeLayerNorm is constructed with.
-            if getattr(module, "weight", None) is not None:
+        is_layernorm = isinstance(module, nn.LayerNorm)
+        # RMSNorm is not an nn.LayerNorm subclass and has no shared base class across
+        # architectures, so match by name. Llama, Mistral, Qwen and Gemma all end in
+        # "RMSNorm"; requiring a `weight` guards against matching an unrelated class.
+        is_rmsnorm = (
+            not is_layernorm
+            and type(module).__name__.endswith("RMSNorm")
+            and getattr(module, "weight", None) is not None
+        )
+        if is_layernorm or is_rmsnorm:
+            if is_rmsnorm:
+                eps = getattr(module, "variance_epsilon", None)
+                if eps is None:
+                    eps = getattr(module, "eps", 1e-6)
+                new_ln = SpikeRMSNorm(module.weight.shape[0], eps)
                 new_ln.weight.data.copy_(module.weight.data)
-            if getattr(module, "bias", None) is not None:
-                new_ln.bias.data.copy_(module.bias.data)
+            else:
+                shape = module.normalized_shape
+                new_ln = SpikeLayerNorm(shape, module.eps)
+
+                # Copy parameters. LayerNorm(elementwise_affine=False) has weight/bias set
+                # to None, which raised "'NoneType' object has no attribute 'data'"; fall
+                # back to the identity affine SpikeLayerNorm is constructed with.
+                if getattr(module, "weight", None) is not None:
+                    new_ln.weight.data.copy_(module.weight.data)
+                if getattr(module, "bias", None) is not None:
+                    new_ln.bias.data.copy_(module.bias.data)
             
             # Find parent module
             path = name.split('.')
@@ -1475,15 +1663,16 @@ def replace_layernorm_with_spikelayernorm(model):
             type(m).__name__ for _n, m in model.named_modules() if "Norm" in type(m).__name__
         })
         logger.warning(
-            "No nn.LayerNorm modules were replaced. "
+            "No normalization modules were replaced. "
             + (
-                f"This model normalises with {other_norms} instead, which this pass does not "
-                "handle (e.g. Llama/SmolLM2 use RMSNorm), so normalization was left unchanged."
+                f"This model normalises with {other_norms}, which this pass does not handle, "
+                "so normalization was left unchanged."
                 if other_norms else "The model has no recognisable normalization layers."
             )
         )
     else:
-        logger.info(f"Replaced {ln_count} LayerNorm modules with SpikeLayerNorm")
+        logger.info(f"Replaced {ln_count} normalization module(s) "
+                    f"with spike-compatible equivalents")
     return model
 
 def replace_attention_with_spikeattention(model, spiking=False):
@@ -1543,6 +1732,13 @@ def replace_attention_with_spikeattention(model, spiking=False):
                 spiking=spiking,
             )
             spike_attn.return_mode = "llama"
+            # Carry over the rotary embedding so Q/K can still be rotated. Newer hosts
+            # pass precomputed cos/sin down to the attention module and this is unused;
+            # older layouts own one per attention block. Losing it means losing all
+            # positional information on Llama-family models, which keep none anywhere else.
+            spike_attn.rotary_emb = getattr(attn, "rotary_emb", None) or getattr(
+                model.model, "rotary_emb", None
+            )
             try:
                 spike_attn.q_proj.weight.data.copy_(attn.q_proj.weight.data)
                 spike_attn.k_proj.weight.data.copy_(attn.k_proj.weight.data)
