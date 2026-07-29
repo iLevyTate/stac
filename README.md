@@ -149,6 +149,20 @@ This is the honest result, and it is informative: only QK^T is spike-driven, and
 remaining dense work is paid on every one of the T timesteps. An energy advantage requires
 spiking activations throughout the network, not only on Q/K/V.
 
+[`docs/energy-crossover.md`](docs/energy-crossover.md) works out what that would take. In
+short: the affordable timestep count is `T_max = 1 / (1 - f(1 - rho*r))`, set almost
+entirely by coverage `f` and barely at all by spike rate `rho`. The current 5.5% coverage
+affords `T <= 1.06`, so no genuinely spiking operating point wins. Coverage above 90% does
+win — and because `lm_head` is `d*V` while the body is `L*d^2`, that is far easier to reach
+on a large model than on this one: spiking the body of SmolLM2-1.7B reaches 94.3% coverage
+and projects 1.78x *better* at T=8. Much of the 7.6x above is an artifact of benchmarking a
+tiny model.
+
+```bash
+python scripts/energy_analysis.py --scaling          # coverage vs. model size
+python scripts/energy_analysis.py --arch smollm2-1.7b --seq_len 2048
+```
+
 ```bash
 python -c "
 from transformers import AutoModelForCausalLM
