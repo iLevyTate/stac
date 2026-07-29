@@ -27,6 +27,22 @@ distilgpt2, WikiText-2, T=8, sliding-window perplexity. ANN baseline **53.64**.
 
 The energy target is reachable. The model that reaches it does not work.
 
+**Re-measured after the fixes** (RoPE, attention encoding, RMSNorm — see §4's fix note):
+the coverage rows are unchanged, as expected, since none of the fixes touch the
+`SpikeLinear` path on GPT-2. The attention rows moved substantially:
+
+| Level | pre-fix ppl | post-fix ppl |
+| --- | ---: | ---: |
+| spiking-attn only | 14,493 (270×) | **2,544 (47×)** |
+| all + spiking-attn | 2,857 (53×) | **2,291 (43×)** |
+
+The calibrated encoding makes spiking attention **5.7× less damaging**, and adding it on
+top of full coverage now costs ~4% instead of worsening it by 30% — the best
+fully-spiking configuration is now 98.6% coverage at 8.83× better projected energy.
+The collapse itself persists (6–7 unique predictions over 256 positions), so the
+conclusion below stands: encoding fidelity through ~37 compounding layers, not any single
+component, is the obstacle, and calibration-only conversion does not clear it.
+
 ---
 
 ## 2 · It is collapse, not degradation
