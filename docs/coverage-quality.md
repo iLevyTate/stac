@@ -174,10 +174,45 @@ alongside them.
 
 ---
 
+## 5b · The collapse survives every fix (confirmation)
+
+The measurements in §§1–4 predate the RoPE, encoding, and RMSNorm fixes. Re-running on the
+fixed pipeline confirms the conclusion is not an artifact of those bugs:
+
+- **distilgpt2**, full coverage, T=8: 6–7 unique predictions over 256 positions, top-1
+  agreement with the ANN 0.03. Unchanged from pre-fix.
+- **SmolLM2-135M**, full coverage vs. the untouched ANN, T=8: perplexity 897× as-is, and a
+  single fitted scalar (0.5) closes **77% of the gap** to 206×. But top-1 agreement is
+  0.027 and next-token accuracy 0.0147 — the calibration helps perplexity, not prediction.
+  The model still collapses.
+
+The 77% figure is worth noting against GPT-2's 0% (§3.1): with RoPE restored, more of the
+SmolLM2 damage is scale rather than shape, so `logit_scale` is now worth fitting — but it
+is cosmetic, not curative. The predictions are gone either way.
+
+**Where the error enters.** Per-block correlation between the spiking and dense residual
+streams (distilgpt2, coverage-only, T=8):
+
+| block | 0 | 1 | 2 | 3 | 4 | 5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| corr | 0.88 | 0.43 | 0.42 | 0.45 | 0.58 | 0.78 |
+
+This is **not** smooth compounding. Block 0 converts cleanly; the discriminative signal
+falls off a cliff at block 1 and never recovers (the rise at block 5 is the shared
+high-norm residual, not restored prediction). That weakens the case for uniform
+sequential calibration as a sufficient fix — the damage is concentrated, not spread — and
+suggests the more likely remedy is spike-aware fine-tuning, or a targeted look at what
+block 1 does that block 0 does not. This is a pointer for future work, not a result: it is
+one model, one measure, and the residual-stream correlation is a coarse proxy.
+
 ## 6 · What this means
 
 **Post-hoc conversion without training does not work.** Not "works with degradation" —
-produces a near-constant function. Three plausible rescues were tested and none moved it.
+produces a near-constant function. Three plausible rescues were tested and none moved it,
+and the collapse persists after the RoPE / encoding / RMSNorm fixes (§5b), so it is a
+property of spike-quantising a frozen network, not a consequence of the bugs those fixes
+removed. The conversion is now faithful (1.00× with spiking off) and still collapses once
+spiking is switched on — which is the cleanest possible statement of the result.
 
 **Coverage is not the obstacle.** Quality *improves* as coverage rises (78× → 53× → 41× at
 T=8), because each `SpikeLinear` calibrates its own threshold and adds per-layer scale
