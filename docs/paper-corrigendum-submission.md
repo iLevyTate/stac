@@ -1,36 +1,62 @@
 # Corrigendum submission — ready to send
 
 Companion to [`corrigendum-2026-07.md`](corrigendum-2026-07.md), which holds the technical
-account. This file holds the text to send to the publisher.
+account. This file holds the text to send.
 
-Fill in `[TITLE]`, `[VENUE]`, `[DATE]`, `[DOI]` before sending.
+The work is a **book chapter** in an edited volume, so the correction is handled by the
+**volume editor and the publisher's production/editorial contact**, not a journal desk.
+Fill in `[CHAPTER TITLE]`, `[BOOK TITLE]`, `[EDITOR(S)]`, `[PUBLISHER]`, `[YEAR]`, and
+`[DOI/ISBN]` before sending.
+
+## How a book chapter gets corrected
+
+Chapters are harder to correct than preprints — the print run is fixed — so the realistic
+routes, in order of preference:
+
+1. **If still in proofs / not yet printed:** send the corrections to the volume editor now
+   as proof corrections. This is the cleanest outcome and avoids a formal erratum entirely.
+2. **If published online with a DOI** (Springer, IGI Global, IntechOpen, Palgrave, etc.):
+   request a **correction/erratum notice linked to the chapter's DOI landing page**. Most
+   academic-book platforms support an erratum attached to the chapter record.
+3. **If published in print only:** ask the editor to carry an **erratum in the next
+   printing or a subsequent edition**, and — since this repository is the cited artifact —
+   land the corrected account in the repo itself (done: `corrigendum-2026-07.md`) so anyone
+   reaching the code from the chapter finds the correction.
+
+In all three cases the repository now carries the authoritative technical record, which is
+the durable correction regardless of what the print artifact can accommodate.
 
 ---
 
-## Cover note to the editor
+## Cover note to the volume editor / publisher
 
-> I am writing to request a corrigendum to "[TITLE]", published in [VENUE] on [DATE], DOI
-> [DOI].
+> Dear [EDITOR(S)] / [PUBLISHER] editorial team,
 >
-> A code audit of the referenced repository established that the STAC V1 spiking pathway was
-> inactive in the released implementation. Two coupled defects were responsible: the AdEx
-> neurons received input current roughly two orders of magnitude below their firing
+> I am writing to request a correction to my chapter "[CHAPTER TITLE]" in *[BOOK TITLE]*
+> ([PUBLISHER], [YEAR]; [DOI/ISBN]).
+>
+> A code audit of the repository cited in the chapter established that the STAC V1 spiking
+> pathway was inactive in the released implementation. Two coupled defects were responsible:
+> the AdEx neurons received input current roughly two orders of magnitude below their firing
 > threshold, and the Gaussian surrogate gradient underflowed float32 to exactly zero at the
 > resulting operating point. Each independently prevented spiking; together they were
 > mutually masking, since the sparsity metric that would have revealed the problem reads
 > zero under both a maximally efficient network and a silent one.
 >
-> No published quantitative result is affected. The paper reports no STAC V1 perplexity,
-> accuracy, or spike-rate figures, and the STAC V2 results and hardware-validation caveats
+> No published quantitative result is affected. The chapter reports no STAC V1 perplexity,
+> accuracy, or spike-rate figures, and the STAC V2 material and hardware-validation caveats
 > are unchanged. The corrections are confined to statements of mechanism in the abstract and
-> the STAC V1 methodology section, plus one reference version correction.
+> the STAC V1 methodology section, plus one reference-version correction, all listed below.
 >
-> Both defects are fixed in the current repository, the corrected behaviour is covered by a
-> regression baseline, and the defect is reproducible via a script included in the
-> repository (`scripts/verify_v1_corrigendum.py`).
+> Both defects are now fixed in the repository, the corrected behaviour is covered by a
+> regression baseline, and the defect is reproducible via a script included there
+> (`scripts/verify_v1_corrigendum.py`). The repository also carries the full technical
+> account (`docs/corrigendum-2026-07.md`).
 >
-> The paper commits to publishing failure reports as a governance practice; this correction
-> is submitted in that spirit.
+> Whether this is best handled as proof corrections, an erratum linked to the chapter's
+> online record, or a note in a future printing, I will follow your process. The chapter
+> commits to publishing failure reports as a governance practice; this correction is offered
+> in that spirit.
 
 ---
 
@@ -113,14 +139,14 @@ directly, or mint a release tag from it and cite that.
 
 ---
 
-## Scope statement (include if the venue asks)
+## Scope statement (include if the editor asks)
 
 The following are **unaffected** and require no correction:
 
 - All STAC V2 material: the conversion pipeline, disabled-spiking disclosure, T=1
   disclosure, and the 3–4× software-latency figure, which was explicitly scoped to
   PyTorch-profiler execution time rather than joules.
-- Every hardware-validation caveat, which the paper already states.
+- Every hardware-validation caveat, which the chapter already states.
 - All SCANAQ and SCANUE material.
 - STAC V1's architecture, training pipeline, and HEMM design, which are as described. The
   model did train; the non-spiking components (GPT-2 backbone, projections, HEMM, lm_head)
