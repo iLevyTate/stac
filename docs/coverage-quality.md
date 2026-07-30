@@ -199,11 +199,30 @@ streams (distilgpt2, coverage-only, T=8):
 
 This is **not** smooth compounding. Block 0 converts cleanly; the discriminative signal
 falls off a cliff at block 1 and never recovers (the rise at block 5 is the shared
-high-norm residual, not restored prediction). That weakens the case for uniform
-sequential calibration as a sufficient fix — the damage is concentrated, not spread — and
-suggests the more likely remedy is spike-aware fine-tuning, or a targeted look at what
-block 1 does that block 0 does not. This is a pointer for future work, not a result: it is
-one model, one measure, and the residual-stream correlation is a coarse proxy.
+high-norm residual, not restored prediction).
+
+**Where the damage originates.** Feeding each block the *clean* dense input in isolation
+(rate-decoded over T=8) separates a block's own transform fidelity from amplified upstream
+error:
+
+| block | cumulative corr | isolated corr | reading |
+| --- | ---: | ---: | --- |
+| 0 | 0.88 | 0.88 | own transform (mildly lossy) |
+| 1 | 0.43 | **0.52** | **own transform (the cliff)** |
+| 2 | 0.43 | 0.98 | fine in isolation — fed corrupted input |
+| 3 | 0.45 | 0.97 | amplification |
+| 4 | 0.58 | 0.97 | amplification |
+| 5 | 0.78 | 0.97 | amplification |
+
+The result is sharp: **blocks 2–5 convert almost perfectly on clean input (0.97+).** The
+damage originates entirely in blocks 0 and 1 — block 1 worst at 0.52 — and everything
+downstream is a faithful converter fed a corrupted signal. The fix therefore does not need
+to touch the whole network; it needs to make the first two blocks convert cleanly. Whether
+that is achievable by spending more timesteps there (a precision fix, and exactly the
+paper's "graduated spiking" track) or requires fine-tuning is the next measurement.
+
+This remains one model and a coarse proxy, but it is now a located defect, not a diffuse
+one.
 
 ## 6 · What this means
 
