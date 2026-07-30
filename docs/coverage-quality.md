@@ -224,6 +224,50 @@ paper's "graduated spiking" track) or requires fine-tuning is the next measureme
 This remains one model and a coarse proxy, but it is now a located defect, not a diffuse
 one.
 
+**More timesteps do not rescue it.** If the early-block damage were rate-code precision,
+spending more timesteps there would recover it (the paper's "graduated spiking" idea).
+Isolated block-1 fidelity across T:
+
+| T | blk0 | blk1 | blk2 | blk3 | blk4 | blk5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 0.885 | 0.521 | 0.976 | 0.968 | 0.968 | 0.973 |
+| 64 | 0.871 | **0.476** | 0.938 | 0.956 | 0.968 | 0.975 |
+
+Block 1 gets slightly *worse* with more timesteps (the no-leak IF's drift accumulating),
+never better. **Graduated timesteps is falsified as a fix.** The information block 1's
+transform loses to binarisation is not recoverable by averaging more spikes.
+
+**Sublayer split is suggestive but confounded.** Isolating attention vs MLP *contributions*
+(the additive deltas, T=8):
+
+| block | attn Δ corr | mlp Δ corr |
+| --- | ---: | ---: |
+| 0 | 0.98 | 0.57 |
+| 1 | 0.47 | 0.11 |
+| 2 | 0.58 | 0.25 |
+
+Both of block 1's contributions convert poorly, and block-1 attention (0.47) is far worse
+than block-0 attention (0.98) — consistent with early layers forming sharp, content-
+specific attention that binarisation blurs. But these correlations are on the *deltas*,
+which are small against the residual stream, so they cannot be ranked directly against the
+block-level numbers above; read them as "which contribution is hardest to spike," not as a
+quality attribution. The clean, load-bearing result is the block-level isolation, not this.
+
+## 5c · Every post-hoc knob has now been tried
+
+| Knob | Result |
+| --- | --- |
+| coverage (5% → 98%) | quality *improves* slightly; collapse persists |
+| logit calibration | 0% of gap on GPT-2, 77% on SmolLM2 but predictions still dead |
+| membrane leak (τ) | monotonically worse |
+| timesteps (8 → 64) | no help; early blocks slightly worse |
+| RoPE / encoding / RMSNorm fixes | conversion faithful (1.00×), collapse persists |
+
+Post-hoc conversion of a frozen transformer is exhausted. The damage is a located,
+precision-independent information loss in the first two blocks, and nothing that leaves the
+weights frozen recovers it. Spike-aware fine-tuning — the paper's third roadmap track — is
+what remains, and it is now demonstrated to be necessary rather than assumed.
+
 ## 6 · What this means
 
 **Post-hoc conversion without training does not work.** Not "works with degradation" —
