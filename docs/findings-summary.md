@@ -14,11 +14,12 @@ in V2. Fixing the bugs that hid this made the pipeline faithful (conversion now 
 the source model to 1.00× perplexity with spiking off) and let the real question be asked:
 does spike conversion of a *frozen* transformer produce a usable model? It does not — it
 collapses the model to near-constant output, and every post-hoc remedy (coverage,
-calibration, leak, timesteps) fails. The energy premise is also weaker than assumed:
-coverage, not sparsity, sets the budget, and the current design projects worse than the
-dense baseline. The net position is a well-supported negative result plus a set of shipped
-fixes, with spike-aware fine-tuning identified — and now demonstrated necessary — as the
-one untried path.
+calibration, leak, timesteps) fails. Letting the weights move does work: a short
+distillation run recovers perplexity 10.5×, where nothing frozen moved it at all. The
+energy premise is separately weaker than assumed: coverage, not sparsity, sets the budget,
+and the current design projects worse than the dense baseline. The net position is a
+well-supported account of why conversion fails, a demonstrated (if not yet finished) path
+through training, and a set of shipped fixes.
 
 ---
 
@@ -130,10 +131,17 @@ and prediction diversity alongside loss and similarity, or it certifies dead net
   fails; the damage is localised to the first two blocks and precision-independent.
 - The four fixes, each with a regression test.
 
-**Open (untested, not shown to fail):**
-- **Spike-aware fine-tuning.** The one remaining path. Now demonstrated necessary rather
-  than assumed, but not attempted — it needs surrogate-gradient training through the spike
-  path, a real dataset, and non-trivial compute.
+**Demonstrated in proof of concept:**
+- **Spike-aware fine-tuning recovers the collapse.** Training the converted network end to
+  end with ANN distillation (`scripts/finetune_spiking.py`) dropped distilgpt2's eval
+  perplexity 10.5× in 300 CPU steps (6,161 → 580), monotonically, where every frozen-weight
+  remedy moved it not at all. Still ~11× above the ANN baseline at this tiny scale — a
+  direction, not a finished result. See [`coverage-quality.md`](coverage-quality.md) §5d.
+
+**Open (untested):**
+- A conclusive fine-tuning run: T=8, longer sequences, thousands of steps, GPU — to see how
+  close training gets to the ANN baseline, and at what coverage the energy advantage
+  survives it.
 - Scale beyond 360M; encodings other than signed soft-reset IF; coherence/task metrics
   beyond perplexity and prediction diversity.
 
