@@ -64,6 +64,15 @@ def parse_args():
                       help='Skip conversion and only run tests on existing model')
     parser.add_argument('--simplified', action='store_true',
                       help='Use simplified conversion approach without relying on complex SpikingJelly features')
+    # The documented "Full Pipeline Mode" (8-bit quantization + extensive calibration) was
+    # unreachable through this runner: it never forwarded --quantize and hardcoded
+    # --num_samples 3.
+    parser.add_argument('--quantize', action='store_true',
+                      help='Load the model with 8-bit quantization before conversion (requires bitsandbytes)')
+    parser.add_argument('--num_samples', type=int, default=3,
+                      help='Number of calibration samples to pass to convert.py (default: 3)')
+    parser.add_argument('--calibration_batch_size', type=int, default=1,
+                      help='Calibration batch size passed to convert.py (default: 1)')
     return parser.parse_args()
 
 def run_component_tests(model_name="distilgpt2"):
@@ -115,32 +124,177 @@ def run_conversion(args):
             "--timesteps", str(args.timesteps)
         ]
     
-    # Add other arguments
-    cmd.extend(["--num_samples", "3"])  # Small number for quick testing
+    # Forward calibration/quantization options instead of hardcoding a quick-test value.
+    cmd.extend(["--num_samples", str(args.num_samples)])
+    cmd.extend(["--batch_size", str(args.calibration_batch_size)])
+    if args.quantize:
+        cmd.append("--quantize")
     
     logger.info(f"Running conversion: {' '.join(cmd)}")
-    
+
+    # A model file left over from an earlier run must not be mistaken for output of
+    # this one, so remember whether it already existed (and when it was last written).
+    model_path = os.path.join(args.output_dir, "snn_model.pt")
+    prior_mtime = os.path.getmtime(model_path) if os.path.exists(model_path) else None
+
     start_time = time.time()
     result = subprocess.run(cmd, capture_output=True, text=True)
     duration = time.time() - start_time
-    
+
     # Print output
     logger.info(result.stdout)
     if result.stderr:
-        logger.error("Errors in conversion phase:")
-        logger.error(result.stderr)
-    
-    # Check if conversion created a model file
-    model_path = os.path.join(args.output_dir, "snn_model.pt")
-    conversion_success = os.path.exists(model_path)
-    
+        # convert.py logs to stderr, so stderr on its own does not mean failure.
+        # Only the exit code does; anything else produced false alarms on success.
+        if result.returncode != 0:
+            logger.error("Errors in conversion phase:")
+            logger.error(result.stderr)
+        else:
+            logger.info("Conversion subprocess log (stderr):")
+            logger.info(result.stderr)
+
+    # Success requires BOTH a clean exit code and a model file this run produced.
+    # Checking only for the file's existence let a stale artifact from a previous run
+    # make a completely failed conversion report success.
+    fresh_model = os.path.exists(model_path) and (
+        prior_mtime is None or os.path.getmtime(model_path) > prior_mtime
+    )
+    conversion_success = result.returncode == 0 and fresh_model
+
     logger.info(f"Conversion completed in {duration:.2f} seconds")
     if conversion_success:
         logger.info(f"✓ Model file created at {model_path}")
     else:
-        logger.error(f"✗ Model file not created at {model_path}")
-    
+        if result.returncode != 0:
+            logger.error(f"✗ Conversion subprocess exited with code {result.returncode}")
+        if not os.path.exists(model_path):
+            logger.error(f"✗ Model file not created at {model_path}")
+        elif not fresh_model:
+            logger.error(
+                f"✗ {model_path} was not rewritten by this run — it is a stale artifact "
+                "from an earlier conversion"
+            )
+
     return conversion_success
+
+def _load_snn_bundle(model_path):
+    """
+    Load a saved bundle, preferring the safe (weights_only=True) path.
+
+    The previous code registered an `add_safe_globals` allowlist and then loaded with
+    `weights_only=False`, which ignores the allowlist entirely — so the block was a no-op.
+    It also allowlisted GPT2LMHeadModel, while the pickled non-tensor object in the bundle
+    is the *config*. Allowlist the config classes and actually attempt the safe load,
+    falling back only when that genuinely fails.
+    """
+    try:
+        from torch.serialization import add_safe_globals
+        from transformers.configuration_utils import PretrainedConfig
+        from transformers.models.gpt2.configuration_gpt2 import GPT2Config
+        add_safe_globals([PretrainedConfig, GPT2Config])
+    except ImportError:
+        logger.debug("add_safe_globals unavailable; will load with weights_only=False")
+
+    try:
+        return torch.load(model_path, map_location='cpu', weights_only=True)
+    except TypeError:
+        # PyTorch older than the weights_only parameter.
+        return torch.load(model_path, map_location='cpu')
+    except Exception as e:
+        logger.warning(
+            f"Safe load (weights_only=True) failed ({type(e).__name__}); "
+            "falling back to weights_only=False. Only do this for artifacts you trust."
+        )
+        return torch.load(model_path, map_location='cpu', weights_only=False)
+
+
+def rebuild_model_from_bundle(output_dir):
+    """
+    Reconstruct a live nn.Module from the saved {state_dict, metadata} bundle.
+
+    `save_snn_model` writes a dictionary, not a module, so anything that needs a runnable
+    model (verification, TorchScript export, the EXPORT_LOIHI mapping) has to rebuild it.
+    Returns None and logs the reason on failure.
+    """
+    from transformers import AutoModelForCausalLM
+
+    model_path = os.path.join(output_dir, "snn_model.pt")
+    config_path = os.path.join(output_dir, "snn_config.json")
+    if not os.path.exists(model_path):
+        logger.error(f"✗ {model_path} does not exist")
+        return None
+
+    snn_data = _load_snn_bundle(model_path)
+    if not (isinstance(snn_data, dict) and "state_dict" in snn_data):
+        # Already a live module (older artifacts).
+        return snn_data
+
+    base_model_name = None
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            base_model_name = json.load(f).get("base_model")
+    if not base_model_name:
+        logger.error("✗ snn_config.json has no base_model entry; cannot rebuild the model")
+        return None
+
+    model = AutoModelForCausalLM.from_pretrained(base_model_name)
+    missing, unexpected = model.load_state_dict(snn_data["state_dict"], strict=False)
+    if missing or unexpected:
+        logger.error(
+            f"✗ Saved state_dict does not match the base model: "
+            f"{len(missing)} missing, {len(unexpected)} unexpected key(s). "
+            f"missing={list(missing)[:5]} unexpected={list(unexpected)[:5]}"
+        )
+        return None
+    model.eval()
+    return model
+
+
+def verify_converted_model(output_dir):
+    """
+    Rebuild the saved model and actually run it.
+
+    `test_converted_model` only reads metadata and prints what a user *would* have to do
+    to run the model; nothing in this pipeline ever loaded the weights back. Combined with
+    --verify being a no-op (its only read site sits in a TorchScript branch that is
+    unreachable, because the saved artifact is always a metadata dict rather than a
+    scriptable module), a corrupt or unloadable artifact passed the whole pipeline.
+    """
+    logger.info("\n=== Verifying Converted Model (reload + forward pass) ===")
+
+    try:
+        from transformers import AutoTokenizer
+
+        model = rebuild_model_from_bundle(output_dir)
+        if model is None:
+            return False
+
+        tokenizer = AutoTokenizer.from_pretrained(output_dir)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        inputs = tokenizer("The capital of France is", return_tensors="pt")
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        logits = outputs.logits
+        expected = (inputs["input_ids"].shape[0], inputs["input_ids"].shape[1])
+        if tuple(logits.shape[:2]) != expected:
+            logger.error(f"✗ Logit shape {tuple(logits.shape)} does not match input {expected}")
+            return False
+        if not torch.isfinite(logits).all():
+            logger.error("✗ Reloaded model produced non-finite logits")
+            return False
+
+        logger.info(f"✓ Reloaded model runs: logits {tuple(logits.shape)}, all finite")
+        return True
+
+    except Exception as e:
+        logger.error(f"✗ Verification failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 def test_converted_model(output_dir):
     """Test the converted model with some prompts."""
@@ -155,26 +309,7 @@ def test_converted_model(output_dir):
     # Try to load the model directly
     try:
         logger.info(f"Loading model from {model_path}...")
-        # First try to import transformers module to ensure it's available for loading
-        try:
-            import transformers
-            # Add necessary classes to safe globals if available
-            try:
-                from torch.serialization import add_safe_globals
-                from transformers.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
-                add_safe_globals([GPT2LMHeadModel])
-                logger.info("Added transformers classes to safe globals")
-            except ImportError:
-                logger.info("torch.serialization.add_safe_globals not available, will try weights_only=False")
-        except ImportError:
-            logger.info("transformers module not imported, might affect model loading")
-        
-        # Try to load with weights_only=False (needed for PyTorch 2.6+)
-        try:
-            snn_data = torch.load(model_path, map_location='cpu', weights_only=False)
-        except TypeError:
-            # Older PyTorch versions don't have weights_only parameter
-            snn_data = torch.load(model_path, map_location='cpu')
+        snn_data = _load_snn_bundle(model_path)
         
         # Check if the loaded data is a dictionary (new format) or a model
         if isinstance(snn_data, dict) and "state_dict" in snn_data:
@@ -309,13 +444,32 @@ def export_torchscript(model, output_path):
             # Create example inputs for tracing
             example_input_ids = torch.zeros(1, 128, dtype=torch.long)
             example_attention_mask = torch.ones(1, 128, dtype=torch.long)
-            
-            # Trace the model
-            with torch.no_grad():
-                traced_model = torch.jit.trace(
-                    model,
-                    (example_input_ids, example_attention_mask)
-                )
+
+            # Trace by KEYWORD. GPT2LMHeadModel.forward is
+            # (input_ids, past_key_values, attention_mask, ...), so passing
+            # (input_ids, attention_mask) positionally handed the mask in as
+            # past_key_values and failed with "Dimension specified as -2 but tensor has
+            # no dimensions". Caching also has to be off: the returned cache tuples are
+            # not traceable, and strict=False allows the dataclass output.
+            if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+                original_use_cache = model.config.use_cache
+                model.config.use_cache = False
+            else:
+                original_use_cache = None
+
+            try:
+                with torch.no_grad():
+                    traced_model = torch.jit.trace(
+                        model,
+                        example_kwarg_inputs={
+                            "input_ids": example_input_ids,
+                            "attention_mask": example_attention_mask,
+                        },
+                        strict=False,
+                    )
+            finally:
+                if original_use_cache is not None:
+                    model.config.use_cache = original_use_cache
             
             # Save the model
             traced_model.save(output_path)
@@ -379,7 +533,14 @@ def main():
     if not model_tests_passed:
         logger.error("Model tests failed. The converted model may not be working correctly.")
         return 1
-    
+
+    # Step 4b: --verify now performs a real check (reload the weights and run the model)
+    # instead of only gating two log lines inside an unreachable TorchScript branch.
+    if args.verify:
+        if not verify_converted_model(args.output_dir):
+            logger.error("Verification failed: the saved model could not be reloaded and run.")
+            return 1
+
     # Warn about flags that are accepted for CLI compatibility but not yet wired up.
     unapplied = [
         name for name, val in (
@@ -400,32 +561,31 @@ def main():
     if args.optimize_for_torchscript:
         logger.info("\n=== Exporting to TorchScript ===")
         try:
-            # Load model again for export
-            model_path = os.path.join(args.output_dir, "snn_model.pt")
-            model = torch.load(model_path, map_location='cpu', weights_only=False)
-
             # The converter saves a metadata dict ({"state_dict": ..., ...}), not a live
-            # nn.Module. torch.jit.script/.eval() on a dict can never succeed, so skip
-            # honestly instead of raising deep inside the exporter.
-            if isinstance(model, dict):
-                logger.warning(
-                    "Saved model is a state-dict/metadata dictionary, not a scriptable "
-                    "nn.Module; skipping TorchScript export. Rebuild and script a live "
-                    "model object to enable this step."
-                )
+            # nn.Module, so this branch used to skip unconditionally — taking the
+            # EXPORT_LOIHI mapping inside export_torchscript() with it. Rebuild a real
+            # module from the bundle instead of giving up.
+            model = rebuild_model_from_bundle(args.output_dir)
+            if model is None:
+                logger.error("Could not rebuild a live model for TorchScript export.")
+                return 1
             else:
                 # Export model
                 ts_path = os.path.join(args.output_dir, "snn_model.pt.ts")
-                export_torchscript(model, ts_path)
+                exported = export_torchscript(model, ts_path)
+                if not exported or not os.path.exists(ts_path):
+                    # The user explicitly asked for this export; a failure must not be
+                    # followed by "All steps completed successfully".
+                    logger.error("TorchScript export failed (--optimize_for_torchscript was requested).")
+                    return 1
 
-                # Verify the exported model
-                if args.verify and os.path.exists(ts_path):
-                    logger.info(f"Successfully created TorchScript model: {ts_path}")
-                    logger.info(f"Model size: {os.path.getsize(ts_path) / (1024 * 1024):.2f} MB")
+                logger.info(f"Successfully created TorchScript model: {ts_path}")
+                logger.info(f"Model size: {os.path.getsize(ts_path) / (1024 * 1024):.2f} MB")
         except Exception as e:
             logger.error(f"Error during TorchScript export: {e}")
             import traceback
             traceback.print_exc()
+            return 1
 
     logger.info("\n=== Pipeline Summary ===")
     logger.info("✓ All steps completed successfully")
@@ -434,6 +594,23 @@ def main():
         logger.warning("  Full SNN functionality might be limited")
     logger.info(f"Converted model is available in: {args.output_dir}")
     
+    # Report the conversion that actually ran. `use_simplified` only records the
+    # *fallback* decision (SpikingJelly unimportable), so an explicit --simplified run —
+    # the one in the README's quick start — was written out as simplified_approach:false.
+    # convert.py records the real outcome in snn_config.json, including the case where a
+    # full conversion silently degraded to the simplified path; prefer that.
+    conversion_mode = None
+    simplified_used = bool(args.simplified)
+    snn_config_path = os.path.join(args.output_dir, "snn_config.json")
+    if os.path.exists(snn_config_path):
+        try:
+            with open(snn_config_path) as f:
+                snn_config = json.load(f)
+            simplified_used = bool(snn_config.get("simplified", simplified_used))
+            conversion_mode = snn_config.get("conversion_mode")
+        except (OSError, ValueError) as e:
+            logger.warning(f"Could not read {snn_config_path}: {e}")
+
     # Save summary report
     summary = {
         "model_name": args.model_name,
@@ -444,7 +621,12 @@ def main():
         "use_delayed_spikes": args.use_delayed_spikes,
         "use_function_calling": args.use_function_calling,
         "optimize_for_torchscript": args.optimize_for_torchscript,
-        "simplified_approach": use_simplified,
+        "quantize": args.quantize,
+        "num_samples": args.num_samples,
+        "calibration_batch_size": args.calibration_batch_size,
+        "simplified_approach": simplified_used,
+        "simplified_forced_by_missing_spikingjelly": use_simplified,
+        "conversion_mode": conversion_mode,
         "status": "success",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }

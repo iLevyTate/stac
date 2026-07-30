@@ -18,13 +18,16 @@ This document explains the critical fixes made to the STAC (Spiking Transformer 
 
 ## Overview
 
+> Locations below reference symbols (classes/functions) rather than line numbers, which
+> drift with every edit. Several citations in this document had already gone stale.
+
 The STAC v2 SNN converter was producing degenerate output (repeated commas like ",,,,,,,,," or repeated words like "The The The The") instead of coherent text. After extensive debugging, four root causes were identified and fixed.
 
 ---
 
 ## Fix 1: SpikeSoftmax Temperature Scaling
 
-**Location:** `smollm2_converter.py`, lines 97-114
+**Location:** `smollm2_converter.py` — the `SpikeSoftmax` class
 
 ### Level 1: Like I'm 5
 
@@ -74,7 +77,7 @@ By removing the temperature division, attention distributions maintain their sha
 
 ## Fix 2: Weight Transpose from Conv1D to Linear
 
-**Location:** `smollm2_converter.py`, lines 1111-1128, 1153-1173, 1203-1206
+**Location:** `smollm2_converter.py` — `replace_attention_with_spikeattention()` (the GPT-2 Conv1D and Llama-style weight-copy branches)
 
 ### Level 1: Like I'm 5
 
@@ -138,7 +141,7 @@ spike_attn.o_proj.weight.data.copy_(block.attn.c_proj.weight.data.t())
 
 ## Fix 3: GELU to ReLU Quality Degradation
 
-**Location:** `smollm2_converter.py`, lines 1388-1406; `test_conversational_snn.py`, lines 1366-1378
+**Location:** `smollm2_converter.py` — `simplified_conversion(skip_gelu_replacement=...)`; `tests/test_conversational_snn.py` — the `skip_gelu` decision in `main()`
 
 ### Level 1: Like I'm 5
 
@@ -206,7 +209,7 @@ def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
 
 ## Fix 4: KV Cache State Contamination
 
-**Location:** `test_conversational_snn.py`, lines 366-374, 741-745
+**Location:** `tests/test_conversational_snn.py` — `simulate_conversation()` and `test_multi_turn_coherence()` (both call `model.reset_cache()` before a fresh conversation)
 
 ### Level 1: Like I'm 5
 

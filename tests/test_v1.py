@@ -6,6 +6,7 @@ from pathlib import Path
 # Allow running this file directly (python tests/test_v1.py) by putting the repo root on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
@@ -15,10 +16,33 @@ from stac_v1.model import AdExParams, DLPFCAdExNeuron, DLPFCLayer, DLPFCTransfor
 from stac_v1.pipeline import STACV1Config, build_dataloader_from_texts, build_model_and_tokenizer, freeze_for_hybrid_finetune, set_seed, train_steps
 
 
+def _load_make_test_models():
+    """Import scripts/make_test_models.py by path (scripts/ is not a package)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_stac_make_test_models",
+        Path(__file__).resolve().parents[1] / "scripts" / "make_test_models.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+
 print("--- Setting up STAC V1 Tests (imported implementation) ---")
 
+# Allow pointing the suite at a locally available model (a path or another hub id) so it
+# can run without network access to the Hugging Face hub. When STAC_TEST_MODEL is unset
+# and the hub is unreachable, a tiny model is generated locally — so running this file
+# directly behaves the same offline as running it under pytest.
+try:
+    TEST_MODEL_NAME = _load_make_test_models().resolve_test_model("sshleifer/tiny-gpt2")
+except Exception:
+    TEST_MODEL_NAME = os.environ.get("STAC_TEST_MODEL", "sshleifer/tiny-gpt2")
+
 TEST_CFG = STACV1Config(
-    model_name="sshleifer/tiny-gpt2",
+    model_name=TEST_MODEL_NAME,
     seq_length=16,
     dlpfc_output_size=8,
     num_recurrent_layers=1,
@@ -28,9 +52,25 @@ TEST_CFG = STACV1Config(
     output_dir=os.path.join(tempfile.gettempdir(), "test_stac_v1_output"),
 )
 
-set_seed(TEST_CFG.seed)
 test_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-os.makedirs(TEST_CFG.output_dir, exist_ok=True)
+
+
+# Importing this module used to reseed numpy/torch globally and create directories as a
+# side effect, which silently changed RNG state for anything else collected in the same
+# pytest session. Do it per test instead, via an autouse fixture (pytest) and explicitly
+# in the __main__ runner.
+@pytest.fixture(autouse=True)
+def _stac_v1_test_env():
+    set_seed(TEST_CFG.seed)
+    os.makedirs(TEST_CFG.output_dir, exist_ok=True)
+    yield
+
+
+def _setup_test_env():
+    """Same setup for the standalone `python tests/test_v1.py` path."""
+    set_seed(TEST_CFG.seed)
+    os.makedirs(TEST_CFG.output_dir, exist_ok=True)
+
 
 # --- Test Functions ---
 
@@ -116,6 +156,25 @@ def test_dlpfc_layer():
     assert spk_trains.shape == expected_shape, f"Output shape mismatch: {spk_trains.shape} vs {expected_shape}"
     assert spk_trains.dtype == torch.float32, f"Output dtype mismatch: {spk_trains.dtype}"
     print("  Output shape and dtype OK.")
+
+    # The layer must actually spike. Shape/dtype checks alone passed for a layer whose
+    # neurons could never reach threshold, which made the whole spiking pathway (and the
+    # L1 spike penalty built on it) a silent no-op.
+    assert set(torch.unique(spk_trains).tolist()) <= {0.0, 1.0}, "Spike train is not binary"
+    spike_rate = spk_trains.mean().item()
+    assert spike_rate > 0.0, "DLPFC layer emitted no spikes at all — neurons never reach threshold"
+    assert spike_rate < 1.0, "DLPFC layer spikes on every step — no sparsity"
+    print(f"  Spike rate {spike_rate:.3f} is in (0, 1). OK.")
+
+    # And gradients must reach the spiking parameters, or the layer can never train.
+    layer.train()
+    grad_probe = torch.randn(batch_size, seq_len, input_size, device=test_device)
+    layer.zero_grad(set_to_none=True)
+    layer(grad_probe).sum().backward()
+    proj_grad = layer.projection.weight.grad
+    assert proj_grad is not None and proj_grad.abs().sum().item() > 0.0, \
+        "No gradient reached the DLPFC projection — the surrogate gradient vanished"
+    print("  Surrogate gradient reaches the projection. OK.")
     print("DLPFCLayer Test PASSED.")
 
 def test_memory_module():
@@ -130,10 +189,23 @@ def test_memory_module():
     spike_train = torch.randint(0, 2, (batch_size, seq_len, input_dim), dtype=torch.float, device=test_device)
     with torch.no_grad():
         memory_bias = module(spike_train)
-    expected_shape = (batch_size, output_dim)
+    expected_shape = (batch_size, seq_len, output_dim)
     assert memory_bias.shape == expected_shape, f"Output shape mismatch: {memory_bias.shape} vs {expected_shape}"
     assert memory_bias.dtype == torch.float32, f"Output dtype mismatch: {memory_bias.dtype}"
     print("  Output shape and dtype OK.")
+
+    # Pooling must be causal: changing a spike at the LAST position may not alter the
+    # memory bias at earlier positions.
+    perturbed = spike_train.clone()
+    perturbed[:, -1, :] = 1.0 - perturbed[:, -1, :]
+    with torch.no_grad():
+        perturbed_bias = module(perturbed)
+    earlier = slice(0, seq_len - 1)
+    assert torch.allclose(memory_bias[:, earlier], perturbed_bias[:, earlier]), \
+        "Memory bias for earlier positions changed when a future spike changed (non-causal pooling)"
+    assert not torch.allclose(memory_bias[:, -1], perturbed_bias[:, -1]), \
+        "Memory bias at the final position ignored its own spikes"
+    print("  Causal pooling OK.")
     print("HyperdimensionalMemoryModule Test PASSED.")
 
 def test_dlpfc_transformer():
@@ -216,6 +288,18 @@ def test_hybrid_finetune_freeze():
     dlpfc_trainable = sum(1 for p in model.dlpfc.parameters() if p.requires_grad)
     assert gpt2_trainable == 0, "GPT-2 backbone should be frozen in hybrid fine-tuning mode"
     assert dlpfc_trainable > 0, "DLPFC should remain trainable in hybrid fine-tuning mode"
+
+    # model.py pins the AdEx reference potentials as non-trainable. A `> 0` count over the
+    # whole DLPFC cannot see them being un-frozen, which is how that regression shipped.
+    for name, module in model.named_modules():
+        if isinstance(module, DLPFCAdExNeuron):
+            for fixed in ("V_th", "V_reset", "V_rest"):
+                param = getattr(module, fixed)
+                assert not param.requires_grad, (
+                    f"{name}.{fixed} must stay non-trainable after hybrid fine-tuning setup"
+                )
+            assert module.tau_m.requires_grad, f"{name}.tau_m should be trainable"
+    print("  Fixed AdEx potentials stayed frozen. OK.")
     print("Hybrid fine-tuning freeze Test PASSED.")
 
 
@@ -261,6 +345,7 @@ def run_all_tests():
     ]
     for test_func in test_functions:
         try:
+            _setup_test_env()
             test_func()
             tests_passed += 1
         except AssertionError as e:

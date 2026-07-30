@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
 
+# Allow running this file directly (`python scripts/run_stac_v1.py`) by putting the repo
+# root on sys.path. Python puts the *script's* directory on sys.path, not the cwd, so
+# without this `import stac_v1` fails even when invoked from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from stac_v1.pipeline import (
     STACV1Config,
+    load_wikitext2_texts,
     build_dataloader_from_texts,
     build_model_and_tokenizer,
     load_checkpoint,
@@ -39,6 +46,16 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output_dir", default="stac_v1_output")
 
+    p.add_argument(
+        "--dataset",
+        choices=["local", "wikitext2"],
+        default="local",
+        help="Training corpus. 'local' uses the built-in sample texts (no extra dependencies); "
+             "'wikitext2' loads WikiText-2 via the optional `datasets` package and falls back "
+             "to the local texts if it is unavailable.",
+    )
+    p.add_argument("--dataset_limit", type=int, default=2000,
+                   help="Max lines to take from --dataset wikitext2 (default: 2000).")
     p.add_argument("--texts_file", default=None, help="Optional UTF-8 text file (one sample per line).")
     p.add_argument(
         "--text",
@@ -82,6 +99,13 @@ def main() -> int:
         texts = args.text
     elif args.texts_file:
         texts = [ln.strip() for ln in Path(args.texts_file).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    elif args.dataset == "wikitext2":
+        try:
+            texts = load_wikitext2_texts(limit=args.dataset_limit)
+            print(f"Loaded {len(texts)} WikiText-2 lines.")
+        except (ImportError, RuntimeError) as e:
+            print(f"WikiText-2 unavailable ({e}); falling back to the built-in sample texts.")
+            texts = _default_texts()
     else:
         texts = _default_texts()
 

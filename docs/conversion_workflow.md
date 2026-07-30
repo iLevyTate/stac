@@ -122,11 +122,21 @@ python tests/test_conversational_snn.py --model_name distilgpt2 --test_multi_tur
 ### Saved Model Structure
 ```
 output_dir/
-├── snn_model.pt          # Converted SNN model
-├── tokenizer/            # Tokenizer files
-├── config.json           # Model configuration
-└── conversion_log.txt    # Conversion details
+├── snn_model.pt              # state_dict + metadata bundle (not a live nn.Module)
+├── snn_config.json           # timesteps, conversion_mode, simplified flag, base_model
+├── conversion_summary.json   # written by scripts/run_conversion.py
+├── config.json               # model configuration
+├── tokenizer.json            # tokenizer files are written at the top level,
+├── tokenizer_config.json     #   not into a tokenizer/ subdirectory
+├── vocab.json
+├── merges.txt
+└── special_tokens_map.json
 ```
+
+Note: `snn_model.pt` holds `{"state_dict": ..., "config": ..., "model_type": ..., "T": ...,
+"simplified": ...}`. Load it by constructing the base model and applying the state dict —
+`torch.load` alone does not return a runnable module. `scripts/run_conversion.py --verify`
+performs exactly that round-trip.
 
 ### Model Metadata
 The saved model includes:

@@ -26,6 +26,7 @@ Outputs:
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -50,11 +51,15 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
+# The model was hardcoded, so this script could not be pointed at a local checkpoint or
+# run without network access to the Hugging Face hub.
+MODEL_NAME = os.environ.get("STAC_TEST_MODEL", "distilgpt2")
+
 
 def build_model(timesteps: int, device: torch.device, mode: str):
-    """Load DistilGPT-2 either as baseline or SNN."""
-    logger.info("Loading base model (distilgpt2)…")
-    base = AutoModelForCausalLM.from_pretrained("distilgpt2").to(device)
+    """Load the base model either as baseline or SNN."""
+    logger.info(f"Loading base model ({MODEL_NAME})…")
+    base = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(device)
 
     if mode == "baseline":
         base.eval()
@@ -124,7 +129,7 @@ def run_multi_turn_chat(turns=3, timesteps=8, device_str: str = None, temperatur
     )
 
     logger.info(f"Using device: {device}")
-    tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -142,7 +147,21 @@ def run_multi_turn_chat(turns=3, timesteps=8, device_str: str = None, temperatur
 
     history_text = ""  # Accumulated plain text history
 
-    for turn, user_msg in enumerate(user_lines[:turns], 1):
+    # `--turns N` was silently capped at len(user_lines): asking for more turns than there
+    # are scripted prompts quietly ran fewer without saying so.
+    if turns > len(user_lines):
+        logger.warning(
+            f"Requested {turns} turns but only {len(user_lines)} scripted prompts exist; "
+            f"running {len(user_lines)}."
+        )
+    effective_turns = min(turns, len(user_lines))
+
+    # Start the conversation from a clean KV/token cache. build_model() returns a fresh
+    # model today, but relying on that makes the function unsafe to call twice.
+    if hasattr(model, "reset_cache"):
+        model.reset_cache()
+
+    for turn, user_msg in enumerate(user_lines[:effective_turns], 1):
         conversation.append({"role": "user", "text": user_msg})
         history_text += f"User: {user_msg}\nAssistant:"
 
@@ -203,4 +222,26 @@ if __name__ == "__main__":
     logger.info("\n===== Conversation Transcript =====")
     for msg in conv:
         prefix = "User" if msg["role"] == "user" else "Assistant"
-        logger.info(f"{prefix}: {msg['text']}") 
+        logger.info(f"{prefix}: {msg['text']}")
+
+    # Check what the run is supposed to demonstrate and exit non-zero when it does not.
+    # Previously this script printed a transcript and always exited 0, so a run that
+    # produced no output at all still looked like a pass. Derive the expectation from the
+    # turns actually run (the script clamps to the number of scripted prompts).
+    user_messages = [m for m in conv if m["role"] == "user"]
+    expected_messages = 2 * len(user_messages)
+    failures = []
+    if not user_messages:
+        failures.append("no conversation turns ran at all")
+    if len(conv) != expected_messages:
+        failures.append(f"expected {expected_messages} messages for {len(user_messages)} turns, got {len(conv)}")
+    empty_replies = [i for i, m in enumerate(conv) if m["role"] == "assistant" and not m["text"].strip()]
+    if empty_replies:
+        failures.append(f"assistant produced empty replies at turns {empty_replies}")
+
+    if failures:
+        for f in failures:
+            logger.error(f"FAIL: {f}")
+        sys.exit(1)
+    logger.info(f"PASS: {len(user_messages)} turns completed with non-empty replies.")
+    sys.exit(0)

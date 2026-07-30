@@ -104,6 +104,70 @@ def _quantized_weight_sparsity(model: torch.nn.Module, max_tensors: int = 50) ->
     return out
 
 
+def _is_stateful_spiking_neuron(module: Any) -> bool:
+    """
+    True for modules that actually integrate membrane state and emit spikes.
+
+    Checked structurally rather than by class name: SpikingJelly neurons subclass
+    `neuron.BaseNode` and expose a voltage threshold plus membrane state; the STAC V1
+    AdEx neuron carries V_th/V_reset/V_rest parameters.
+    """
+    try:
+        from spikingjelly.activation_based import neuron as _sj_neuron
+        if isinstance(module, _sj_neuron.BaseNode):
+            return True
+    except Exception:
+        pass
+    if _safe_class_name(module) == "DLPFCAdExNeuron":
+        return True
+    # Generic fallback: a threshold plus some form of membrane state.
+    has_threshold = hasattr(module, "v_threshold") or hasattr(module, "V_th")
+    has_state = hasattr(module, "v") or hasattr(module, "v_reset") or hasattr(module, "V_reset")
+    return bool(has_threshold and has_state)
+
+
+def _count_invoked_spiking_neurons(
+    model: torch.nn.Module,
+    neuron_modules: List[torch.nn.Module],
+    sample_input: torch.Tensor,
+) -> Optional[int]:
+    """
+    Run one forward pass and count how many of `neuron_modules` were actually invoked.
+
+    Presence in the module tree is not participation: a model can construct spiking
+    neurons and then bypass them in forward(), which no static check can see.
+
+    Hooks are attached to the module objects directly. Resolving them by *name* does not
+    work here: the names are collected from the unwrapped inner model
+    ("transformer.h.0.attn.q_spk") while the forward pass runs on the wrapper, whose
+    namespace prefixes them ("snn_model.transformer.h.0.attn.q_spk"). Name matching
+    therefore hooked nothing and this always returned 0, regardless of the model.
+
+    Returns None if the forward pass could not be run.
+    """
+    invoked = set()
+    handles = []
+
+    def _hook(mod, _inp, _out):
+        invoked.add(id(mod))
+
+    try:
+        for module in neuron_modules:
+            handles.append(module.register_forward_hook(_hook))
+        was_training = model.training
+        model.eval()
+        with torch.no_grad():
+            model(sample_input)
+        if was_training:
+            model.train()
+    except Exception:
+        return None
+    finally:
+        for h in handles:
+            h.remove()
+    return len(invoked)
+
+
 def _is_embedding_weight(name: str) -> bool:
     # Common HF GPT-2 embeddings
     return (
@@ -123,11 +187,16 @@ def validate_loihi_export_readiness(
     *,
     intended_weight_bits: int = 8,
     require_spiking_neurons: bool = True,
+    sample_input: Optional[torch.Tensor] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
     Returns (export_ready, report_dict).
 
     export_ready is True only when there are no HARD_BLOCK findings.
+
+    Pass `sample_input` (a token-id tensor) to additionally check that the spiking
+    neurons are actually *invoked* during a forward pass, rather than merely present in
+    the module tree.
     """
     findings: List[Finding] = []
 
@@ -138,30 +207,87 @@ def validate_loihi_export_readiness(
         findings.append(Finding(
             id="wrapper_detected",
             severity="INFO",
-            message=f"Model appears to be wrapped ({wrapper_name}); validating inner snn_model as well.",
+            message=(
+                f"Model appears to be wrapped ({wrapper_name}); structural checks below "
+                "run against the inner snn_model."
+            ),
             detail={"wrapper": wrapper_name, "inner": _safe_class_name(inner)},
         ))
     else:
         inner = model
 
-    # Spiking neuron presence (heuristic)
-    spiking_like = 0
+    # Spiking neuron presence.
+    #
+    # Counting by class name alone treated SpikeSoftmax (a plain torch.softmax) and
+    # SpikeAttention (whose LIF neurons are constructed but bypassed) as evidence of
+    # spiking, so a model that performs no spiking computation at all was reported as
+    # "Detected N spiking-like modules". Separate the two questions: which modules are
+    # *named* like spiking components, and which are actual stateful spiking neurons.
+    name_matched = []
+    real_neurons = []
+    real_neuron_modules = []
     for _n, m in inner.named_modules():
         cn = _safe_class_name(m)
-        if "LIF" in cn or "IF" in cn or "Spike" in cn or "AdEx" in cn:
-            spiking_like += 1
-    if require_spiking_neurons and spiking_like == 0:
+        if "LIF" in cn or "IFNode" in cn or "Spike" in cn or "AdEx" in cn:
+            name_matched.append(_n)
+        if _is_stateful_spiking_neuron(m):
+            real_neurons.append(_n)
+            real_neuron_modules.append(m)
+
+    if require_spiking_neurons and not real_neurons:
         findings.append(Finding(
             id="no_spiking_modules_detected",
             severity="HARD_BLOCK",
-            message="No spiking-like modules detected (heuristic: class name contains LIF/IF/Spike).",
+            message=(
+                "No stateful spiking neurons found. "
+                f"{len(name_matched)} module(s) are named like spiking components but do not "
+                "carry membrane state, so the model performs no spiking computation."
+            ),
+            detail={"name_matched": name_matched[:20], "name_matched_count": len(name_matched)},
         ))
     else:
         findings.append(Finding(
             id="spiking_modules_detected",
             severity="INFO",
-            message=f"Detected {spiking_like} spiking-like modules (heuristic).",
+            message=(
+                f"Detected {len(real_neurons)} stateful spiking neuron module(s). "
+                "Presence in the module tree does not prove they run; pass sample_input "
+                "to check participation in the forward pass."
+            ),
+            detail={
+                "spiking_neurons": real_neurons[:20],
+                "spiking_neuron_count": len(real_neurons),
+                "name_matched_count": len(name_matched),
+            },
         ))
+
+    # Are those neurons actually on the forward path?
+    if real_neurons and sample_input is not None:
+        invoked = _count_invoked_spiking_neurons(model, real_neuron_modules, sample_input)
+        if invoked is None:
+            findings.append(Finding(
+                id="spiking_participation_unknown",
+                severity="INFO",
+                message="Could not run a forward pass to check spiking-neuron participation.",
+            ))
+        elif invoked == 0:
+            findings.append(Finding(
+                id="spiking_neurons_not_invoked",
+                severity="HARD_BLOCK",
+                message=(
+                    f"None of the {len(real_neurons)} spiking neurons were invoked during a "
+                    "forward pass: they are constructed but bypassed, so the model performs "
+                    "no spiking computation."
+                ),
+                detail={"spiking_neuron_count": len(real_neurons), "invoked": 0},
+            ))
+        else:
+            findings.append(Finding(
+                id="spiking_neurons_invoked",
+                severity="INFO" if invoked == len(real_neurons) else "WARNING",
+                message=f"{invoked}/{len(real_neurons)} spiking neurons ran during a forward pass.",
+                detail={"spiking_neuron_count": len(real_neurons), "invoked": invoked},
+            ))
 
     # Attention is the big blocker for direct Loihi mapping in this repo today.
     #
@@ -211,8 +337,13 @@ def validate_loihi_export_readiness(
         ))
 
     # Loihi metadata presence (only indicates someone tried to export/map)
-    has_loihi_config = hasattr(model, "_loihi_config")
-    has_loihi_flag = getattr(model, "_is_loihi_compatible", False)
+    # Check the wrapper AND the inner model: an exporter may tag either one, and looking
+    # only at the wrapper reported "metadata missing" for a correctly tagged inner model.
+    has_loihi_config = hasattr(model, "_loihi_config") or hasattr(inner, "_loihi_config")
+    has_loihi_flag = bool(
+        getattr(model, "_is_loihi_compatible", False)
+        or getattr(inner, "_is_loihi_compatible", False)
+    )
     if has_loihi_flag and has_loihi_config:
         findings.append(Finding(
             id="loihi_metadata_present",

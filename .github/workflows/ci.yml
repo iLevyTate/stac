@@ -46,6 +46,15 @@ jobs:
         pip install flake8 || echo "⚠ flake8 install failed"
       continue-on-error: true
 
+    - name: Lint (syntax-level errors only)
+      # flake8 was installed by the step above and then never run. Gate on real errors
+      # (undefined names, syntax errors) rather than style, so this cannot fail on
+      # formatting while still catching a NameError that import checks would miss.
+      run: |
+        flake8 --select=E9,F63,F7,F82 --show-source \
+          smollm2_converter.py convert.py loihi_constraints.py spikingjelly_compat.py \
+          scripts stac_v1 tests
+
     - name: Syntax check (compile every Python file)
       run: |
         python -m compileall -q smollm2_converter.py convert.py loihi_constraints.py spikingjelly_compat.py scripts stac_v1 tests
@@ -72,6 +81,21 @@ jobs:
     - name: Run STAC V1 unit tests (gating)
       run: |
         python tests/test_v1.py
+
+    - name: Build offline test models
+      # Generates tiny GPT-2 / Llama / GQA-Llama checkpoints locally so the suite does
+      # not depend on huggingface.co being reachable from the runner.
+      run: |
+        python scripts/make_test_models.py --out local/test-models
+
+    - name: Run the pytest suite (gating)
+      # tests/test_conversational_snn.py used to be uncollectable (its test functions
+      # request fixtures), so this suite never ran in CI. Use the generated model so the
+      # run is fast, deterministic, and independent of the hub.
+      env:
+        STAC_TEST_MODEL: local/test-models/tiny-gpt2
+      run: |
+        python -m pytest tests/ -q
     
   documentation:
     runs-on: ubuntu-latest

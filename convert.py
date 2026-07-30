@@ -136,14 +136,56 @@ def create_calibration_data(tokenizer: AutoTokenizer, num_samples: int = 10, max
     
     return inputs
 
-def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str, torch.Tensor], timesteps: int = 64, device: str = 'cpu') -> torch.nn.Module:
+# Smooth activations an ANN->SNN conversion must replace with ReLU. Matching only GELU
+# meant this pass replaced nothing on Llama-family models (SmolLM2 uses SiLU), so
+# `--simplified` was close to a no-op there while still reporting success.
+SMOOTH_ACTIVATION_CLASS_NAMES = (
+    "GELU", "GELUActivation", "NewGELUActivation", "FastGELUActivation", "QuickGELUActivation",
+    "SiLU", "SiLUActivation", "SwishActivation",
+)
+
+
+# Attribute used to record how a model was actually converted, so the saved metadata
+# reports the truth even when the full conversion silently fell back.
+CONVERSION_MODE_ATTR = "_stac_conversion_mode"
+
+
+def _log_activation_replacement(model: torch.nn.Module, replaced: int) -> None:
+    """Report what the activation substitution actually did."""
+    if replaced:
+        logger.info(f"Replaced {replaced} smooth activation module(s) with ReLU")
+        return
+    present = sorted({
+        type(m).__name__ for _n, m in model.named_modules()
+        if "Act" in type(m).__name__ or type(m).__name__ in ("SiLU", "GELU", "ReLU", "Tanh")
+    })
+    logger.warning(
+        "No smooth activation modules were replaced. Activation modules present: "
+        f"{present or 'none (activation may be applied functionally)'}. "
+        "The model's activations are unchanged."
+    )
+
+
+def _mark_simplified_fallback(model: torch.nn.Module) -> torch.nn.Module:
+    """Tag a model produced by the simplified fallback path."""
+    setattr(model, CONVERSION_MODE_ATTR, "simplified_fallback")
+    return model
+
+
+def was_simplified(model: torch.nn.Module) -> bool:
+    """True when `model` came from the simplified path (directly or via fallback)."""
+    return str(getattr(model, CONVERSION_MODE_ATTR, "simplified")) != "ann2snn"
+
+
+def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str, torch.Tensor], timesteps: int = 64, device: str = 'cpu', batch_size: int = 1) -> torch.nn.Module:
     """Convert model to SNN using SpikeZIP-TF method."""
     logger.info("Running SpikeZIP-TF conversion...")
     
     # Step 1: Replace GeLU with ReLU in-place (SNN-friendly activation)
-    logger.info("Replacing GeLU with ReLU...")
+    logger.info("Replacing smooth activations (GELU/SiLU family) with ReLU...")
+    replaced_activations = 0
     for name, mod in list(model.named_modules()):
-        if mod.__class__.__name__ not in ("GELU", "GELUActivation", "NewGELUActivation"):
+        if mod.__class__.__name__ not in SMOOTH_ACTIVATION_CLASS_NAMES:
             continue
         # Swap the activation out on its parent. Reassigning `mod.__class__` in place
         # produced an nn.ReLU instance lacking the `inplace` attribute, which raises
@@ -160,7 +202,9 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
             setattr(model, child_name, torch.nn.ReLU())
         else:
             continue
-        logger.info("Replaced GELU with ReLU")
+        replaced_activations += 1
+
+    _log_activation_replacement(model, replaced_activations)
 
     # Step 2: Insert quantizers for 8-bit precision
     logger.info("Inserting 8-bit quantizers...")
@@ -172,34 +216,41 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
     
     # Step 3: Prepare calibration dataloader format
     logger.info("Preparing calibration data...")
-    calib_data_list: List[Tuple[Dict[str, torch.Tensor], None]] = []
-    
-    # Create a simple dataloader-like structure (data, target)
-    # Since our calibration data only needs input_ids and attention_mask
+    # SpikingJelly's Converter iterates `for (imgs, _) in dataloader` and calls
+    # `imgs.to(device)` / `ann(imgs)`, so each item must be a *tensor* and not the
+    # dict produced by the tokenizer. Feeding dicts raised AttributeError inside the
+    # converter, which the broad except below turned into a silent fallback.
+    # `--batch_size` was parsed and documented but never read anywhere; it now controls
+    # how the calibration samples are grouped, which is what the Converter iterates over.
+    calib_data_list: List[Tuple[torch.Tensor, None]] = []
+    step = max(1, int(batch_size))
+
     with torch.no_grad():
-        for i in range(len(calibration_data["input_ids"])):
-            sample = {
-                "input_ids": calibration_data["input_ids"][i].unsqueeze(0),
-                "attention_mask": calibration_data["attention_mask"][i].unsqueeze(0)
-            }
-            calib_data_list.append((sample, None))
-    
+        all_ids = calibration_data["input_ids"]
+        for i in range(0, len(all_ids), step):
+            calib_data_list.append((all_ids[i:i + step], None))
+    logger.info(f"Prepared {len(calib_data_list)} calibration batch(es) of up to {step} sample(s)")
+
     # Check if Converter is available
     if Converter is None:
         logger.error("Converter not available, falling back to simplified conversion")
         return simplified_conversion(model, timesteps)
-    
+
     try:
         # Step 4: SpikeZIP-TF conversion
         logger.info(f"Converting to SNN with {timesteps} timesteps...")
-        
+
+        # NOTE: Converter's signature is (dataloader, device=None, mode='Max',
+        # momentum=0.1, fuse_flag=True). It has no `T` parameter — passing one raised
+        # TypeError on every single run, so this branch could never succeed and the
+        # pipeline silently degraded to simplified_conversion while still reporting
+        # a full conversion. The timestep count is applied by the caller instead.
         snn_converter = Converter(
-            mode="max",
             dataloader=calib_data_list,
-            T=timesteps,
-            device=device
+            mode="max",
+            device=device,
         )
-        
+
         try:
             # This might fail on the first attempt due to complex model structure
             # We'll use a try-except block to handle the conversion
@@ -240,17 +291,24 @@ def convert_model_to_spiking(model: torch.nn.Module, calibration_data: Dict[str,
                             logger.info(f"Replaced attention with SpikeAttention ({num_heads} heads)")
 
             logger.info("SNN conversion complete!")
+            setattr(snn_model, CONVERSION_MODE_ATTR, "ann2snn")
             return snn_model
-            
+
         except Exception as e:
-            logger.error(f"Failed to convert to SNN: {e}")
-            logger.info("Falling back to simplified conversion...")
+            logger.warning(
+                f"Full ann2snn conversion failed ({type(e).__name__}: {e}). "
+                "Falling back to the simplified conversion — the result is NOT an "
+                "ann2snn-converted SNN and will be recorded as simplified."
+            )
             # If conversion fails, use the simplified approach
-            return simplified_conversion(model, timesteps)
+            return _mark_simplified_fallback(simplified_conversion(model, timesteps))
     except Exception as e:
-        logger.error(f"Error during SNN conversion: {e}")
-        logger.info("Falling back to simplified conversion...")
-        return simplified_conversion(model, timesteps)
+        logger.warning(
+            f"Full ann2snn conversion could not be set up ({type(e).__name__}: {e}). "
+            "Falling back to the simplified conversion — the result is NOT an "
+            "ann2snn-converted SNN and will be recorded as simplified."
+        )
+        return _mark_simplified_fallback(simplified_conversion(model, timesteps))
 
 def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.nn.Module:
     """
@@ -260,9 +318,10 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
     logger.info("Using simplified conversion approach...")
     
     # 1. Replace GELU with ReLU (SNN friendly)
-    logger.info("Replacing GeLU with ReLU...")
+    logger.info("Replacing smooth activations (GELU/SiLU family) with ReLU...")
+    replaced_activations = 0
     for name, mod in list(model.named_modules()):
-        if mod.__class__.__name__ not in ("GELU", "GELUActivation", "NewGELUActivation"):
+        if mod.__class__.__name__ not in SMOOTH_ACTIVATION_CLASS_NAMES:
             continue
         # Swap the activation out on its parent. Reassigning `mod.__class__` in place
         # produced an nn.ReLU instance lacking the `inplace` attribute, which raises
@@ -279,8 +338,10 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
             setattr(model, child_name, torch.nn.ReLU())
         else:
             continue
-        logger.info("Replaced GELU with ReLU")
+        replaced_activations += 1
     
+    _log_activation_replacement(model, replaced_activations)
+
     # 2. Add SNN-specific attributes
     setattr(model, 'T', timesteps)  # Store timesteps in the model
     
@@ -299,11 +360,16 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
             # For models without explicit thresholds, annotate with metadata.
             # (nn.ReLU has no `threshold` attribute, so there is nothing to scale here.)
             if isinstance(module, torch.nn.ReLU):
-                # Add threshold attribute for when it gets converted to spiking
+                # Annotate the intended spiking threshold. persistent=False keeps it OUT
+                # of state_dict(): as a persistent buffer it added keys that no plain
+                # transformer model has, so reloading the saved weights with
+                # load_state_dict(strict=True) failed with "Unexpected key(s) in
+                # state_dict: ...mlp.act.v_threshold" — while doing nothing functionally,
+                # since nn.ReLU never reads it.
                 module.register_buffer(
-                    'v_threshold', 
+                    'v_threshold',
                     torch.tensor(activation_bound * (T_target / T_original)),
-                    persistent=True
+                    persistent=False
                 )
     
     # 4. Add a custom forward method wrapper
@@ -330,6 +396,8 @@ def simplified_conversion(model: torch.nn.Module, timesteps: int = 64) -> torch.
         model.forward = types.MethodType(snn_forward, model)
     
     logger.info("Applied simplified SNN conversion")
+    if not hasattr(model, CONVERSION_MODE_ATTR):
+        setattr(model, CONVERSION_MODE_ATTR, "simplified")
     return model
 
 def save_snn_model(model: torch.nn.Module, path: str, timesteps: Optional[int] = None, simplified: bool = True) -> bool:
@@ -396,11 +464,14 @@ def main() -> int:
         )
     else:
         logger.info("Loading model without quantization (full precision)...")
+        # Do NOT pass device_map here: it makes `accelerate` a hard requirement even
+        # for the plain full-precision path (transformers raises ImportError), while
+        # requirements.txt lists accelerate as optional. A plain .to(device) is
+        # equivalent for a single-device load.
         model = AutoModelForCausalLM.from_pretrained(
-            args.model_name, 
-            device_map=device,
+            args.model_name,
             torch_dtype=torch.float32  # Use float32 for conversion compatibility
-        )
+        ).to(device)
     
     model.eval()
     
@@ -421,18 +492,28 @@ def main() -> int:
             snn_model = simplified_conversion(model, args.timesteps)
         else:
             snn_model = convert_model_to_spiking(
-                model, 
-                calibration_data, 
+                model,
+                calibration_data,
                 args.timesteps,
-                device
+                device,
+                batch_size=args.batch_size,
             )
         
         # Step 4: Save the converted model
         os.makedirs(args.output_dir, exist_ok=True)
         logger.info(f"Saving converted SNN model to {args.output_dir}")
-        
+
+        # Record what the pipeline actually produced, not what was requested. A run
+        # without --simplified can still end up simplified via the fallback above.
+        simplified_used = was_simplified(snn_model)
+        if simplified_used and not args.simplified:
+            logger.warning(
+                "Requested full conversion but the simplified path was used; "
+                "recording simplified=True in the saved metadata."
+            )
+
         # Save SNN model
-        save_snn_model(snn_model, f"{args.output_dir}/snn_model.pt", timesteps=args.timesteps, simplified=args.simplified)
+        save_snn_model(snn_model, f"{args.output_dir}/snn_model.pt", timesteps=args.timesteps, simplified=simplified_used)
         tokenizer.save_pretrained(args.output_dir)
         
         # Also save model config for reference
@@ -442,7 +523,9 @@ def main() -> int:
         # Save SNN-specific attributes in a separate config file
         snn_config = {
             "timesteps": args.timesteps,
-            "simplified": args.simplified,
+            "simplified": simplified_used,
+            "simplified_requested": args.simplified,
+            "conversion_mode": str(getattr(snn_model, CONVERSION_MODE_ATTR, "simplified")),
             "base_model": args.model_name
         }
         

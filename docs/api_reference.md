@@ -152,15 +152,19 @@ Calibrate spike timing for different timestep counts.
 
 ### `save_snn_model(model, tokenizer, path)`
 
-Save the converted SNN model with metadata.
+Save the converted SNN model with metadata. (`smollm2_converter` version.)
 
 **Parameters:**
 - `model` (torch.nn.Module): SNN model to save
 - `tokenizer`: Associated tokenizer
-- `path` (str): Save path
+- `path` (str): Save directory
 
 **Returns:**
 - Success status
+
+> **Note:** `convert.py` exports a *different* function of the same name,
+> `save_snn_model(model, path, timesteps=None, simplified=True)`, which takes a file path
+> and no tokenizer. Import the one matching the module you converted with.
 
 ## Utility Functions
 
@@ -243,7 +247,15 @@ python scripts/run_conversion.py [OPTIONS]
 - `--output_dir`: Output directory
 - `--timesteps`: Number of SNN timesteps
 - `--simplified`: Use simplified conversion
-- `--verify`: Run post-conversion verification
+- `--verify`: Reload the saved weights into the base model and run a forward pass
+- `--quantize`: Load with 8-bit quantization before converting (requires `bitsandbytes`)
+- `--num_samples`: Calibration samples (default 3)
+- `--calibration_batch_size`: Calibration batch size (default 1)
+- `--optimize_for_torchscript`: Also export a TorchScript artifact next to the model
+
+Flags accepted for CLI compatibility but **not applied** by this runner (it warns when
+they are set): `--use_sparse`, `--use_delayed_spikes`, `--use_function_calling`, and
+`--surrogate_function` values other than the default.
 
 ### `tests/test_conversational_snn.py`
 
@@ -316,11 +328,11 @@ from smollm2_converter import *
 model = AutoModelForCausalLM.from_pretrained("distilgpt2")
 tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
 
-# Convert to SNN
-snn_model = simplified_conversion(model, timesteps=16)
-
-# Wrap with temporal processor
-processor = TemporalSpikeProcessor(snn_model, T=16)
+# Convert to SNN. This ALREADY returns a TemporalSpikeProcessor — do not wrap it again.
+# Re-wrapping nests T x T timestep loops, applies the logit scaling twice, and makes the
+# inner processor's KV cache grow by T positions per call until it exceeds the model's
+# max_position_embeddings and raises "IndexError: index out of range in self".
+processor = simplified_conversion(model, timesteps=16)
 
 # Test conversation
 result = simulate_conversation(processor, tokenizer, turns=3)
@@ -329,17 +341,24 @@ result = simulate_conversation(processor, tokenizer, turns=3)
 ### Advanced Usage
 ```python
 # Full pipeline conversion
-from convert import convert_model_to_spiking, create_calibration_data
+from convert import convert_model_to_spiking, create_calibration_data, was_simplified
+from convert import save_snn_model as save_converted_model
+from smollm2_converter import apply_surrogate_gradients
 
 # Create calibration data
 calib_data = create_calibration_data(tokenizer, num_samples=10)
 
-# Convert with calibration
+# Convert with calibration. SpikingJelly's ann2snn requires a torch.fx-traceable model;
+# HuggingFace causal LMs generally are not, so this falls back to the simplified path.
+# Check which one you actually got before reporting results.
 snn_model = convert_model_to_spiking(model, calib_data, timesteps=32)
+print("simplified fallback used:", was_simplified(snn_model))
 
 # Apply surrogate gradients
 snn_model = apply_surrogate_gradients(snn_model, alpha=4.0)
 
-# Save model
-save_snn_model(snn_model, tokenizer, "./my_snn_model")
+# Save model. NOTE: the two modules have different signatures —
+#   convert.save_snn_model(model, path, timesteps=None, simplified=True)
+#   smollm2_converter.save_snn_model(model, tokenizer, path)
+save_converted_model(snn_model, "./my_snn_model/snn_model.pt", timesteps=32)
 ``` 

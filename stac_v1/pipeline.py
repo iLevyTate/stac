@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -15,7 +16,7 @@ from transformers import GPT2Tokenizer, get_linear_schedule_with_warmup
 
 from loihi_constraints import validate_loihi_export_readiness, write_report
 
-from .model import AdExParams, DLPFCTransformer
+from .model import AdExParams, DLPFCAdExNeuron, DLPFCTransformer
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,16 @@ def freeze_for_hybrid_finetune(
     """
     for p in model.parameters():
         p.requires_grad = True
+
+    # model.py pins the AdEx reference potentials as non-trainable by design. The blanket
+    # enable above silently un-froze them, so hybrid fine-tuning was training V_th /
+    # V_reset / V_rest against that stated design. Re-pin them.
+    for module in model.modules():
+        if isinstance(module, DLPFCAdExNeuron):
+            for fixed in ("V_th", "V_reset", "V_rest"):
+                param = getattr(module, fixed, None)
+                if param is not None:
+                    param.requires_grad = False
 
     if freeze_backbone:
         for p in model.gpt2.parameters():
@@ -126,8 +137,44 @@ def build_dataloader_from_texts(
     shuffle: bool,
 ) -> DataLoader:
     cleaned = [t for t in texts if isinstance(t, str) and t.strip()]
+    if not cleaned:
+        # An empty dataloader used to surface much later as a training run that reported
+        # loss 0.0 / perplexity 1.0. Fail here, where the cause is obvious.
+        raise ValueError(
+            "No usable training texts: every entry was empty or not a string. "
+            "Check --text / --texts_file."
+        )
     tokenized = _tokenize_texts(tokenizer, cleaned, seq_length=seq_length)
     return DataLoader(tokenized, batch_size=int(batch_size), shuffle=bool(shuffle))
+
+
+def load_wikitext2_texts(split: str = "train", limit: Optional[int] = 2000) -> List[str]:
+    """
+    Load WikiText-2 lines via the optional `datasets` package.
+
+    Both READMEs described STAC V1 as trained on WikiText-2, but no dataset loading
+    existed anywhere: the pipeline only ever saw four hardcoded sentences. This makes the
+    claim executable. `datasets` stays optional — callers fall back to local texts.
+
+    Raises ImportError if `datasets` is absent, or RuntimeError if the download fails
+    (e.g. no network), so the caller can decide what to do.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError as e:
+        raise ImportError(
+            "WikiText-2 requires the optional `datasets` package: pip install datasets"
+        ) from e
+
+    try:
+        dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split=split)
+    except Exception as e:
+        raise RuntimeError(f"Could not load WikiText-2 ({e}). Falling back is the caller's choice.") from e
+
+    texts = [line.strip() for line in dataset["text"] if line and line.strip()]
+    if limit:
+        texts = texts[: int(limit)]
+    return texts
 
 
 def _atomic_write_json(path: Path, data: Dict) -> None:
@@ -247,6 +294,11 @@ def train_steps(
 
     if hybrid_finetune:
         freeze_for_hybrid_finetune(model, freeze_backbone=True, train_lm_head=train_lm_head)
+    else:
+        # Full fine-tuning still has to honour train_lm_head. Previously this branch did
+        # nothing at all, so `--no_train_lm_head --no_hybrid_finetune` trained the LM head
+        # anyway while the run summary recorded train_lm_head as False.
+        freeze_for_hybrid_finetune(model, freeze_backbone=False, train_lm_head=train_lm_head)
 
     module_counts = _module_param_counts(model)
 
@@ -255,10 +307,20 @@ def train_steps(
         raise RuntimeError("No trainable parameters. Check hybrid fine-tuning freeze settings.")
 
     optimizer = AdamW(trainable_params, lr=float(cfg.learning_rate), weight_decay=float(cfg.weight_decay))
+    total_steps = max(1, int(max_steps))
+    # Cap warmup so it cannot swallow the whole run. With the default warmup_steps=100 and
+    # the documented short runs (--steps 3), the schedule never left warmup: every step
+    # ran at a small fraction of the configured learning rate, so nothing trained.
+    warmup_steps = min(int(cfg.warmup_steps), max(0, total_steps // 10))
+    if warmup_steps != int(cfg.warmup_steps):
+        logging.getLogger(__name__).info(
+            "Clamping warmup_steps %d -> %d for a %d-step run",
+            int(cfg.warmup_steps), warmup_steps, total_steps,
+        )
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=int(cfg.warmup_steps),
-        num_training_steps=max(1, int(max_steps)),
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
     )
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -270,7 +332,18 @@ def train_steps(
     spike_neuron_min_sum = 0.0
     spike_neuron_max_sum = 0.0
 
-    for batch in dataloader:
+    # Repeat the dataloader until max_steps is reached. Iterating it once silently capped
+    # a run at len(dataloader) steps, so `--steps N` quietly did fewer than N.
+    def _step_batches():
+        while True:
+            empty = True
+            for batch in dataloader:
+                empty = False
+                yield batch
+            if empty:
+                return
+
+    for batch in _step_batches():
         if steps >= max_steps:
             break
 
@@ -306,12 +379,20 @@ def train_steps(
         spike_neuron_max_sum += s["spike_neuron_mean_max"]
         steps += 1
 
-    avg_loss = loss_sum / max(1, steps)
-    avg_l1 = l1_sum / max(1, steps)
-    avg_spike = spike_sum / max(1, steps)
-    avg_spike_frac_zero = spike_frac_zero_sum / max(1, steps)
-    avg_spike_neuron_min = spike_neuron_min_sum / max(1, steps)
-    avg_spike_neuron_max = spike_neuron_max_sum / max(1, steps)
+    if steps == 0:
+        # Dividing by max(1, 0) reported train_loss 0.0 / perplexity 1.0 for a run that
+        # never trained — a perfect-looking result from an empty dataloader.
+        raise RuntimeError(
+            "train_steps completed 0 steps: the dataloader yielded no batches. "
+            "Check the training texts and batch size."
+        )
+
+    avg_loss = loss_sum / steps
+    avg_l1 = l1_sum / steps
+    avg_spike = spike_sum / steps
+    avg_spike_frac_zero = spike_frac_zero_sum / steps
+    avg_spike_neuron_min = spike_neuron_min_sum / steps
+    avg_spike_neuron_max = spike_neuron_max_sum / steps
 
     out: Dict[str, float] = {
         "steps": float(steps),
@@ -333,7 +414,18 @@ def train_steps(
     }
 
     if write_loihi_report:
-        export_ready, report = validate_loihi_export_readiness(model, intended_weight_bits=8, require_spiking_neurons=True)
+        # Pass a real input so the validator can confirm the spiking neurons actually run
+        # rather than only existing in the module tree.
+        sample_input = None
+        try:
+            vocab = int(model.gpt2.config.vocab_size)
+            sample_input = torch.randint(0, min(vocab, 1000), (1, 8), device=device)
+        except Exception as e:
+            logging.getLogger(__name__).warning("Could not build a Loihi validator sample input: %s", e)
+
+        export_ready, report = validate_loihi_export_readiness(
+            model, intended_weight_bits=8, require_spiking_neurons=True, sample_input=sample_input
+        )
         report["stac_v1"] = {
             "hybrid_finetune": bool(hybrid_finetune),
             "train_lm_head": bool(train_lm_head),

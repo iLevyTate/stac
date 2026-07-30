@@ -43,6 +43,10 @@ class TrainReport:
     loss_type: str
     avg_loss: float
     out_dir: str
+    # Which student the adapter was fitted to. A consumer that builds a different one
+    # (e.g. GELU vs ReLU MLPs) is evaluating the adapter on a function it never saw.
+    replaced_gelu_with_relu: bool = False
+    last_token_only: bool = False
 
 
 def _default_prompts() -> List[str]:
@@ -73,6 +77,12 @@ def parse_args() -> argparse.Namespace:
                    help="Distillation temperature for KL (default: 2.0)")
     p.add_argument("--train_spike_layernorm", action="store_true",
                    help="Also train SpikeLayerNorm affine params (small) in addition to LoRA.")
+    p.add_argument("--replace_gelu", action="store_true",
+                   help="Convert the student's GELU activations to ReLU. OFF by default so the "
+                        "student matches the one tests/test_conversational_snn.py builds for "
+                        "parity evaluation (which skips the replacement unless --loihi_mode). "
+                        "Training against a ReLU student and evaluating a GELU one silently "
+                        "distilled the adapter onto a different function.")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
@@ -95,10 +105,14 @@ def main() -> int:
     for p in teacher.parameters():
         p.requires_grad = False
 
-    # Student (converted)
+    # Student (converted). Keep the activation choice identical to the model the adapter
+    # will later be evaluated on, and record it alongside the adapter.
     base = AutoModelForCausalLM.from_pretrained(args.model_name).to(device)
-    base = replace_gelu_with_relu(base)
-    student_wrapper = simplified_conversion(base, timesteps=args.timesteps).to(device)
+    if args.replace_gelu:
+        base = replace_gelu_with_relu(base)
+    student_wrapper = simplified_conversion(
+        base, timesteps=args.timesteps, skip_gelu_replacement=not args.replace_gelu
+    ).to(device)
     student_wrapper.train()
 
     # LoRA adapters
@@ -163,8 +177,14 @@ def main() -> int:
 
         # Compare logits on all positions
         if args.last_token_only:
-            t_logits_use = t_logits[:, -1:, :]
-            s_logits_use = s_logits[:, -1:, :]
+            # Select each sequence's last *real* token. The tokenizer right-pads, so
+            # `[:, -1:, :]` picked the logits after the padding for every sequence
+            # shorter than the longest in the batch — i.e. distilled the wrong position.
+            last_idx = tok.attention_mask.sum(dim=1).long() - 1
+            last_idx = last_idx.clamp(min=0)
+            rows = torch.arange(s_logits.size(0), device=s_logits.device)
+            t_logits_use = t_logits[rows, last_idx].unsqueeze(1)
+            s_logits_use = s_logits[rows, last_idx].unsqueeze(1)
         else:
             t_logits_use = t_logits
             s_logits_use = s_logits
@@ -173,7 +193,9 @@ def main() -> int:
             loss = F.mse_loss(s_logits_use, t_logits_use)
         elif args.loss_type == "ce_teacher":
             # Hard distillation to improve top-1 agreement: cross-entropy to teacher argmax labels.
-            # Use last token only unless overridden by last_token_only flag.
+            # Operates on whatever `--last_token_only` selected above: all positions by
+            # default, or only each sequence's last real token when the flag is set.
+            # (The comment here previously stated the inverse.)
             labels = torch.argmax(t_logits_use.detach(), dim=-1)
             # Flatten (B,S,V) -> (B*S,V)
             loss = F.cross_entropy(
@@ -241,6 +263,8 @@ def main() -> int:
         loss_type=args.loss_type,
         avg_loss=float(avg_loss),
         out_dir=str(out_dir),
+        replaced_gelu_with_relu=bool(args.replace_gelu),
+        last_token_only=bool(args.last_token_only),
     )
     (out_dir / "train_report.json").write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
     print(f"Saved adapter to {out_dir}")

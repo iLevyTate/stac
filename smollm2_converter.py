@@ -16,6 +16,7 @@ Specialized script for creating a conversational spiking language model.
 # ---------------------------------------------------------------------------
 """
 import argparse
+import inspect
 import torch
 import torch.nn as nn
 import os
@@ -24,6 +25,22 @@ import logging
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from typing import Dict, List, Tuple, Optional, Union
+
+# Configure logging BEFORE importing spikingjelly. Importing spikingjelly calls
+# logging.info() at module scope, which installs a root StreamHandler at level WARNING —
+# after that, the `hasHandlers()` guard below skips configuration and every INFO message
+# from this module is dropped. Running this file as a CLI produced no progress output at
+# all as a result.
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('snn_conversion.log')
+        ]
+    )
+logger = logging.getLogger("smollm2_converter")
 
 # Import and check SpikingJelly version first
 import importlib.metadata
@@ -54,27 +71,18 @@ logging.info(f"Using SpikingJelly version: {sj_version}")
 # neuron/surrogate/converter/quantizer components come through the compatibility layer.
 from spikingjelly.activation_based import functional
 # Cannot directly import Quantizer - using compatibility layer
-from spikingjelly_compat import get_neuron, get_converter, get_quantizer, get_surrogate
+from spikingjelly_compat import (get_neuron, get_if_neuron, get_converter,
+                                 get_quantizer, get_surrogate)
 
 
 
 # Get components from compatibility layer
 LIFNode = get_neuron()
+IFNode = get_if_neuron()
 SurrogateModule = get_surrogate()
 Converter = get_converter()
 Quantizer = get_quantizer()
 
-# Configure logging
-if not logging.getLogger().hasHandlers():
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('snn_conversion.log')
-        ]
-    )
-logger = logging.getLogger("smollm2_converter")
 
 # Spike-compatible layer normalization
 class SpikeLayerNorm(nn.Module):
@@ -92,6 +100,34 @@ class SpikeLayerNorm(nn.Module):
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, keepdim=True, unbiased=False)
         return self.weight * (x - mean) / torch.sqrt(var + self.eps) + self.bias
+
+class SpikeRMSNorm(nn.Module):
+    """
+    Spiking-compatible RMS normalization.
+
+    Llama-family models — including every SmolLM2 variant this repo targets — normalise
+    with RMSNorm, not LayerNorm. The LayerNorm pass matched `nn.LayerNorm` only, so
+    "spike-compatible normalization" was silently a no-op on exactly the models the
+    conversion is aimed at.
+
+    RMSNorm rescales by the root-mean-square without subtracting the mean, so unlike
+    LayerNorm it is already sign-preserving and needs no change in form here; this exists
+    so the replacement pass reports honestly and so the module is under STAC's control for
+    later spike-domain work.
+    """
+
+    def __init__(self, hidden_size, eps=1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.eps = eps
+
+    def forward(self, x):
+        # Compute in float32: the mean of squares underflows in fp16 for small activations.
+        dtype = x.dtype
+        x32 = x.float()
+        variance = x32.pow(2).mean(-1, keepdim=True)
+        return self.weight * (x32 * torch.rsqrt(variance + self.eps)).to(dtype)
+
 
 # Spike-compatible softmax
 class SpikeSoftmax(nn.Module):
@@ -114,61 +150,209 @@ class SpikeSoftmax(nn.Module):
         return torch.softmax(x, dim=self.dim)
 
 class SpikeAttention(nn.Module):
-    """Spiking-compatible self-attention implementation."""
-    def __init__(self, embed_dim, num_heads, T=16, causal=True):
+    """
+    Spiking-compatible self-attention.
+
+    Two modes:
+
+    * ``spiking=False`` (default) — Q/K/V stay real-valued and attention is the standard
+      scaled dot-product with softmax. This reproduces the source model's attention to
+      float precision and is what every existing test and CLI path uses.
+    * ``spiking=True`` — Q/K/V are passed through LIF neurons and become binary spike
+      trains, and softmax is dropped. Spike-form Q/K/V are non-negative, so ``(Q Kᵀ) V``
+      is already a valid non-negative similarity; this is the Spikformer-style "spiking
+      self-attention" formulation. Softmax over binary inputs would both destroy the
+      sparsity that makes an SNN cheap and reintroduce a non-neuromorphic primitive.
+
+    Grouped-query attention is supported: ``num_kv_heads`` may be smaller than
+    ``num_heads``, in which case K/V heads are repeated to match Q (the standard
+    ``repeat_kv``). SmolLM2-135M/360M need this.
+    """
+
+    def __init__(self, embed_dim, num_heads, T=16, causal=True, layer_idx=None,
+                 num_kv_heads=None, spiking=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
+        self.num_kv_heads = int(num_kv_heads) if num_kv_heads else num_heads
+        if self.num_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({self.num_heads}) must be divisible by num_kv_heads "
+                f"({self.num_kv_heads})"
+            )
+        self.num_kv_groups = self.num_heads // self.num_kv_heads
         self.T = T
         self.causal = causal
         # Controls the return-tuple layout expected by the host transformer block.
         # "gpt2": (output, present[, attn]); "llama": (output, attn, present).
         self.return_mode = "gpt2"
+        # Required to update a transformers Cache object (Llama-style decoders index the
+        # cache per layer). Set when replacing an attention module that carries one.
+        self.layer_idx = layer_idx
+        self.spiking = bool(spiking)
+        # Set from the replaced module when the host owns a per-layer rotary embedding
+        # (older Llama layouts). Newer hosts pass precomputed cos/sin down instead.
+        self.rotary_emb = None
 
+        kv_dim = self.num_kv_heads * self.head_dim
         self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, kv_dim)
+        self.v_proj = nn.Linear(embed_dim, kv_dim)
         self.o_proj = nn.Linear(embed_dim, embed_dim)
-        
-        # Re-enable spiking dynamics on projected Q / K / V
-        # Using lower thresholds to make neurons more sensitive and generate more spikes
-        self.q_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
-        self.k_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
-        self.v_spk = LIFNode(v_threshold=0.1, v_reset=0.0, detach_reset=True)
-        
+
+        # Spiking dynamics on projected Q / K / V. Active only when self.spiking is set;
+        # in the default mode these are constructed but unused (a state the Loihi
+        # constraints validator reports honestly).
+        #
+        # Integrate-and-fire with SOFT reset, not the leaky hard-reset LIF this used to
+        # build. A leaky neuron with hard reset at a fixed threshold of 0.1 does not
+        # rate-code: it discards everything above threshold, so it behaves as a 1-bit
+        # quantiser at an arbitrary cut point. Measured against realistic Q/K/V (std ~1):
+        #     LIFNode(0.1, hard reset):  corr 0.974 with 1[x > 0.1]
+        #                                corr 0.805 with the actual magnitude
+        #     signed soft-reset IF:      corr 0.989 with the actual magnitude
+        # Inputs are normalised by a calibrated per-layer scale (see `qkv_threshold`), so
+        # the neuron itself keeps a unit threshold and standard dynamics.
+        self.q_spk = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.k_spk = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.v_spk = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.q_spk_neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.k_spk_neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        self.v_spk_neg = IFNode(v_threshold=1.0, v_reset=None, detach_reset=True)
+        # Q/K/V are signed; a single population silently drops every negative component.
+        # Calibrated by `calibrate_spike_attention`; 1.0 is a neutral default.
+        self.register_buffer("qkv_threshold", torch.ones(3))
+
         self.spike_softmax = SpikeSoftmax(T=T, dim=-1)
+
+    def _encode(self, x, pos_neuron, neg_neuron, slot):
+        """
+        Signed rate code: two opposing populations, normalised by a calibrated scale.
+
+        The scale is multiplied back so the tensor keeps the magnitude of what it encodes;
+        the wire is still binary and on hardware the scale folds into downstream weights.
+        Spike counting in `spike_metrics.py` is unaffected — it hooks the neurons, not this.
+        """
+        threshold = self.qkv_threshold[slot].clamp(min=1e-6)
+        normalised = x / threshold
+        spikes = pos_neuron(normalised.clamp(min=0.0)) - neg_neuron((-normalised).clamp(min=0.0))
+        return spikes * threshold
+
+    def _apply_rope(self, q, k, position_embeddings=None, position_ids=None):
+        """
+        Rotate Q/K by the host model's rotary embeddings, when it has any.
+
+        Returns the inputs untouched for architectures that do not use RoPE (GPT-2), or
+        when the host passes nothing to rotate with. `rotary_emb` is set by
+        `replace_attention_with_spikeattention` from the module being replaced, so this
+        also works on hosts that hand down `position_ids` rather than precomputed cos/sin.
+        """
+        cos = sin = None
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+        elif self.rotary_emb is not None:
+            if position_ids is None:
+                position_ids = torch.arange(
+                    q.shape[-2], device=q.device, dtype=torch.long
+                ).unsqueeze(0)
+            cos, sin = self.rotary_emb(q, position_ids)
+
+        if cos is None:
+            return q, k
+
+        try:
+            from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+        except ImportError:  # pragma: no cover - transformers without Llama
+            logger.warning("Could not import apply_rotary_pos_emb; leaving Q/K unrotated.")
+            return q, k
+
+        cos = cos.to(dtype=q.dtype)
+        sin = sin.to(dtype=q.dtype)
+        return apply_rotary_pos_emb(q, k, cos, sin)
+
+    @staticmethod
+    def _repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+        """Expand [B, kv_heads, T, D] to [B, kv_heads * n_rep, T, D] (grouped-query)."""
+        if n_rep == 1:
+            return x
+        batch, kv_heads, seq_len, head_dim = x.shape
+        x = x[:, :, None, :, :].expand(batch, kv_heads, n_rep, seq_len, head_dim)
+        return x.reshape(batch, kv_heads * n_rep, seq_len, head_dim)
     
-    def forward(self, hidden_states, attention_mask=None, layer_past=None, 
-               head_mask=None, use_cache=False, output_attentions=False, **kwargs):
+    def forward(self, hidden_states, attention_mask=None, layer_past=None,
+               head_mask=None, use_cache=False, output_attentions=False,
+               past_key_value=None, **kwargs):
         batch_size, seq_length = hidden_states.shape[:2]
-        
+
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
-        
+
         q = q.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, seq_length, self.num_heads, self.head_dim).transpose(1, 2)
+        # K/V carry num_kv_heads, which is smaller than num_heads under grouped-query
+        # attention. They are expanded to match Q *after* the cache update, so the cache
+        # stores the compact (un-repeated) form the host model expects.
+        k = k.view(batch_size, seq_length, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_length, self.num_kv_heads, self.head_dim).transpose(1, 2)
+
+        # Rotary position embeddings. Llama-family models (every SmolLM2 variant) carry ALL
+        # of their positional information in RoPE — unlike GPT-2, which keeps it in a
+        # learned embedding this conversion never touches. The host decoder layer passes
+        # `position_embeddings` straight through to the attention module, and this module
+        # accepted it via **kwargs and dropped it on the floor: converting SmolLM2 threw
+        # away position entirely, measured at 19-28x worse perplexity with spiking OFF.
+        #
+        # Applied BEFORE the cache update, matching upstream Llama: the cache stores
+        # post-RoPE keys, so rotating after the update would leave cached history unrotated
+        # and re-rotate it on every subsequent step.
+        q, k = self._apply_rope(q, k, kwargs.get("position_embeddings"),
+                                kwargs.get("position_ids"))
+
+        # GPT-2 blocks pass the cache as `layer_past`; Llama-style decoders pass it as
+        # `past_key_value`, and it may be a transformers Cache object rather than a
+        # (k, v) tuple. Reading only `layer_past` meant the cache branch never ran on
+        # Llama/SmolLM2, and returning a bare tuple made LlamaModel crash later with
+        # "'tuple' object has no attribute 'to_legacy_cache'".
+        cache_obj = past_key_value if past_key_value is not None else layer_past
+        present = None
+
+        if cache_obj is not None and hasattr(cache_obj, "update"):
+            # transformers Cache: it stores the new keys/values and returns the full history.
+            k, v = cache_obj.update(k, v, self.layer_idx)
+            present = cache_obj if use_cache else None
+        else:
+            if cache_obj is not None:
+                past_key, past_value = cache_obj[0], cache_obj[1]
+                k = torch.cat((past_key, k), dim=-2)
+                v = torch.cat((past_value, v), dim=-2)
+            present = (k, v) if use_cache else None
         
-        if layer_past is not None:
-            past_key, past_value = layer_past
-            k = torch.cat((past_key, k), dim=-2)
-            v = torch.cat((past_value, v), dim=-2)
-        
-        present = (k, v) if use_cache else None
-        
-        # Reset neuron states to handle dynamic input shapes
-        functional.reset_net(self.q_spk)
-        functional.reset_net(self.k_spk) 
-        functional.reset_net(self.v_spk)
-        
-        # For now, skip spiking neurons in attention to preserve text generation quality
-        # Pass Q and K through spiking neurons (disabled for better generation)
-        q_spikes = q  # self.q_spk(q)
-        k_spikes = k  # self.k_spk(k)
-        v_spikes = v  # self.v_spk(v)
-        
+        # Expand grouped K/V heads to match Q. Done after the cache update so the cache
+        # keeps the compact form.
+        k = self._repeat_kv(k, self.num_kv_groups)
+        v = self._repeat_kv(v, self.num_kv_groups)
+
+        if self.spiking:
+            # Membrane state must persist ACROSS the timesteps of one sequence — that is
+            # what makes TemporalSpikeProcessor's T-loop compute something different each
+            # step. Resetting here would restore the old behaviour where every timestep
+            # was identical and the loop was an exact no-op at T x the cost.
+            # TemporalSpikeProcessor.forward calls functional.reset_net(self.snn_model)
+            # once before the loop, which is the correct reset point.
+            q_spikes = self._encode(q, self.q_spk, self.q_spk_neg, 0)
+            k_spikes = self._encode(k, self.k_spk, self.k_spk_neg, 1)
+            v_spikes = self._encode(v, self.v_spk, self.v_spk_neg, 2)
+        else:
+            # Non-spiking (default): reset so leftover membrane state cannot leak between
+            # calls, and use the real-valued projections directly.
+            for neuron in (self.q_spk, self.k_spk, self.v_spk,
+                           self.q_spk_neg, self.k_spk_neg, self.v_spk_neg):
+                functional.reset_net(neuron)
+            q_spikes = q
+            k_spikes = k
+            v_spikes = v
+
         attn_weights = torch.matmul(q_spikes, k_spikes.transpose(-1, -2)) / (self.head_dim ** 0.5)
 
         # Always enforce causal masking when this is a causal attention layer.
@@ -186,31 +370,60 @@ class SpikeAttention(nn.Module):
             attn_weights = attn_weights.masked_fill(causal_mask, -10000.0)
 
         if attention_mask is not None:
+            # A mask reaching this point is one of two kinds:
+            #   * multiplicative / "keep" mask: 1 = attend, 0 = ignore  (HF's 2D input mask)
+            #   * additive mask: 0 = attend, large negative = ignore    (what HF hands to
+            #     attention modules, e.g. a [B, 1, tgt, src] float mask with -3.4e38)
+            # Distinguish them by sign, NOT by `max() <= 1`: an additive mask also has
+            # max 0, so that test re-inverted it into (1 - (-3.4e38)) * -1e4 = -inf on
+            # every masked position. Whole rows became -inf and softmax returned NaN, so
+            # any batch containing padding produced NaN logits.
+            is_keep_mask = bool(attention_mask.min() >= 0)
+
             if attention_mask.dim() == 2:
-                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-                extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-                attn_weights = attn_weights + extended_attention_mask
+                # [B, src] -> [B, 1, 1, src]
+                extended_attention_mask = attention_mask[:, None, None, :]
             elif attention_mask.dim() == 3:
-                if attention_mask.size(1) == 1:
-                    extended_attention_mask = attention_mask.unsqueeze(2)
-                else:
-                    extended_attention_mask = attention_mask.unsqueeze(1).transpose(-2, -1)
-                if attention_mask.max() <= 1:
-                    extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-                attn_weights = attn_weights + extended_attention_mask
+                # [B, tgt, src] -> [B, 1, tgt, src]
+                extended_attention_mask = attention_mask[:, None, :, :]
             elif attention_mask.dim() == 4:
-                if attention_mask.max() <= 1:
-                    attention_mask = (1.0 - attention_mask) * -10000.0
-                attn_weights = attn_weights + attention_mask
+                extended_attention_mask = attention_mask
             else:
                 logger.warning(f"Unexpected attention_mask shape: {attention_mask.shape}")
-                attn_weights = attn_weights + attention_mask
+                extended_attention_mask = attention_mask
+
+            if is_keep_mask:
+                extended_attention_mask = (1.0 - extended_attention_mask.to(attn_weights.dtype)) * -10000.0
+            else:
+                extended_attention_mask = extended_attention_mask.to(attn_weights.dtype)
+
+            # Guard against a mask whose key axis disagrees with the score matrix (e.g. a
+            # mask covering only the new tokens while attending over a KV cache).
+            if extended_attention_mask.size(-1) != attn_weights.size(-1):
+                logger.warning(
+                    f"attention_mask key length {extended_attention_mask.size(-1)} != "
+                    f"score length {attn_weights.size(-1)}; ignoring the mask for this step."
+                )
+            else:
+                attn_weights = attn_weights + extended_attention_mask
         
-        attn_probs = self.spike_softmax(attn_weights)
-        
+        if self.spiking:
+            # Spikformer-style spiking self-attention: no softmax. Binary spike-form Q/K
+            # give a non-negative similarity already, and softmax would both destroy the
+            # sparsity an SNN depends on and reintroduce a primitive with no neuromorphic
+            # implementation. Masked positions were filled with a large negative value
+            # above, so clamp them away rather than letting them contribute.
+            attn_probs = attn_weights.clamp(min=0.0)
+            # Normalise by the number of attended positions so the scale stays comparable
+            # across sequence lengths (softmax otherwise provided this).
+            denom = (attn_probs > 0).to(attn_probs.dtype).sum(dim=-1, keepdim=True).clamp(min=1.0)
+            attn_probs = attn_probs / denom
+        else:
+            attn_probs = self.spike_softmax(attn_weights)
+
         if head_mask is not None:
             attn_probs = attn_probs * head_mask
-        
+
         context = torch.matmul(attn_probs, v_spikes)
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_length, self.embed_dim)
         output = self.o_proj(context)
@@ -279,6 +492,11 @@ class LoihiCausalContextMixer(nn.Module):
 
         # Always return a tuple; the host GPT-2 block does `attn_output = attn_outputs[0]`
         # and `outputs = attn_outputs[1:]`, which breaks on a bare tensor return.
+        # LlamaDecoderLayer instead unpacks exactly three values
+        # (hidden_states, self_attn_weights, present_key_value), so a 2-tuple raised
+        # "ValueError: not enough values to unpack (expected 3, got 2)" on SmolLM2.
+        if getattr(self, "return_mode", "gpt2") == "llama":
+            return output, None, present
         if output_attentions:
             return output, present, None
         return output, present
@@ -294,7 +512,11 @@ def _fake_int8_quantize_tensor(w: torch.Tensor) -> Tuple[torch.Tensor, torch.Ten
         max_abs = float(w_fp32.abs().max().item()) if w_fp32.numel() > 0 else 0.0
         scale = max(max_abs / 127.0, 1e-8)
         q = torch.clamp(torch.round(w_fp32 / scale), -127, 127).to(torch.int8)
-        return q, torch.tensor(scale, dtype=torch.float32, device=w.device)
+        # Return the scale in the ORIGINAL weight dtype. It was hardcoded to float32,
+        # so QuantizedEmbedding's "preserve the scale's dtype" logic always resolved to
+        # float32 and silently promoted a quantized fp16/bf16 model — exactly what that
+        # code comments say it avoids.
+        return q, torch.tensor(scale, dtype=w.dtype, device=w.device)
 
 
 class QuantizedLinearLike(nn.Module):
@@ -378,10 +600,46 @@ class QuantizedHashedEmbedding(nn.Module):
         self._stac_fake_quant_bits = 8
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+        # Match QuantizedEmbedding: keep the model's dtype instead of forcing float32,
+        # which broke dtype-matched matmuls in a quantized fp16/bf16 model.
+        dtype = self.scale.dtype
         bucket_ids = torch.remainder(input_ids, self.num_buckets)
-        w = self.qweight.to(dtype=torch.float32) * self.scale.to(dtype=torch.float32)
+        w = self.qweight.to(dtype=dtype) * self.scale.to(dtype=dtype)
         out = torch.index_select(w, 0, bucket_ids.view(-1)).view(*bucket_ids.shape, -1)
-        return out.to(dtype=torch.float32)
+        return out
+
+
+def _untie_input_output_embeddings(model: nn.Module, reason: str) -> None:
+    """
+    Break HuggingFace's input/output embedding weight tying.
+
+    GPT-2 and friends tie `lm_head.weight` to the input embedding table. Once the input
+    embedding is replaced by a bucketed or fake-quantized module, that tie is actively
+    harmful: `tie_weights()` — which `save_pretrained`, `from_pretrained` and
+    `resize_token_embeddings` all call — re-points the output head at the new table.
+    With bucketing that silently turned a vocab-sized output layer into a
+    num_buckets-sized one (the model emitted bucket scores instead of token logits);
+    with quantization it raised
+    "AttributeError: 'QuantizedEmbedding' object has no attribute 'weight'".
+    """
+    config = getattr(model, "config", None)
+    if config is None or not getattr(config, "tie_word_embeddings", False):
+        return
+
+    # Give the output head its own storage before dropping the tie.
+    head = getattr(model, "lm_head", None)
+    head_weight = getattr(head, "weight", None) if head is not None else None
+    if isinstance(head_weight, torch.Tensor):
+        with torch.no_grad():
+            head.weight = nn.Parameter(
+                head_weight.detach().clone(), requires_grad=head_weight.requires_grad
+            )
+
+    config.tie_word_embeddings = False
+    # `_tied_weights_keys` drives the tying machinery on load; clear it too.
+    if getattr(model, "_tied_weights_keys", None):
+        model._tied_weights_keys = []
+    logger.info(f"Untied input/output embeddings ({reason}).")
 
 
 def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn.Module:
@@ -396,9 +654,20 @@ def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn
     for name, module in list(model.named_modules()):
         if not isinstance(module, nn.Embedding):
             continue
-        # Heuristic: only apply to token embeddings, not positional embeddings
-        if not (name.endswith("wte") or ".wte" in name):
+        # Heuristic: only apply to token embeddings, not positional embeddings.
+        # `wte` is GPT-2's name; Llama-family models (SmolLM2) call it `embed_tokens`, so
+        # matching only `wte` made --loihi_embed_buckets a silent no-op on the second
+        # advertised architecture.
+        is_token_embedding = (
+            name.endswith("wte") or ".wte" in name
+            or name.endswith("embed_tokens") or ".embed_tokens" in name
+        )
+        if not is_token_embedding:
             continue
+
+        # Break the tie before swapping the table out, while lm_head still aliases the
+        # full-vocab weights it must keep.
+        _untie_input_output_embeddings(model, "embedding bucketing")
 
         w = module.weight.detach()
         vocab, hidden = w.shape
@@ -406,14 +675,19 @@ def apply_loihi_embedding_bucketing(model: nn.Module, *, num_buckets: int) -> nn
         device = w.device
 
         with torch.no_grad():
-            bucket_w = torch.zeros((nb, hidden), device=device, dtype=w.dtype)
+            # Accumulate in float32: each bucket sums vocab/nb embedding rows, which can
+            # lose precision (or overflow) in fp16. Cast back at the end so a fp16/bf16
+            # model keeps its dtype — dividing an fp16 accumulator by a float32 `counts`
+            # tensor promoted the bucket table, and with it the quantization scale
+            # derived from it, silently making the model float32 again.
+            bucket_w = torch.zeros((nb, hidden), device=device, dtype=torch.float32)
             counts = torch.zeros((nb,), device=device, dtype=torch.float32)
             ids = torch.arange(vocab, device=device)
             buckets = torch.remainder(ids, nb)
-            bucket_w.index_add_(0, buckets, w)
+            bucket_w.index_add_(0, buckets, w.to(dtype=torch.float32))
             counts.index_add_(0, buckets, torch.ones_like(ids, dtype=torch.float32))
             counts = torch.clamp(counts, min=1.0).unsqueeze(1)
-            bucket_w = bucket_w / counts
+            bucket_w = (bucket_w / counts).to(dtype=w.dtype)
 
         # Replace module
         path = name.split(".")
@@ -435,6 +709,9 @@ def apply_fake_int8_quantization_for_loihi(model: nn.Module) -> nn.Module:
     - transformers Conv1D (class name 'Conv1D') and similar linear-like modules with weight+bias
     - nn.Embedding
     """
+    # Replacing the input embedding invalidates weight tying (see the helper's docstring).
+    _untie_input_output_embeddings(model, "fake int8 quantization")
+
     replaced = 0
     for name, module in list(model.named_modules()):
         # find parent
@@ -583,6 +860,18 @@ class TemporalSpikeProcessor(nn.Module):
     """Processes input through SNN model over multiple timesteps."""
     def __init__(self, snn_model, T=16, max_context_length=512):
         super().__init__()
+        # Never nest processors. Wrapping a TemporalSpikeProcessor in another one runs
+        # T x T timestep loops, applies the logit scaling twice, and drives the inner
+        # KV cache out of step with the sequence (observed cache lengths 16, 1, 17, 2 for
+        # a conversation of true lengths 16, 17, 18, 19). Unwrap to the real model
+        # instead — earlier documentation actively encouraged this pattern.
+        if isinstance(snn_model, TemporalSpikeProcessor):
+            logger.warning(
+                "TemporalSpikeProcessor was given another TemporalSpikeProcessor; "
+                "unwrapping it rather than nesting timestep loops."
+            )
+            snn_model = snn_model.snn_model
+
         # Store the model directly - no need for Converter here since
         # simplified_conversion already does the layer replacements
         self.snn_model = snn_model
@@ -592,7 +881,9 @@ class TemporalSpikeProcessor(nn.Module):
         self.T = T
         self.kv_cache = None
         self.max_context_length = max_context_length
-        self.device = next(snn_model.parameters()).device if list(snn_model.parameters()) else "cpu"
+        # NOTE: `device` is a *live* property, not a snapshot. Caching it here meant a
+        # later `.to('cuda')` left it pointing at CPU, and every tensor built from it
+        # (position ids, empty KV placeholders) landed on the wrong device.
         # Initialize dictionary to store batch-specific KV caches
         self.batch_kv_caches = {}
         # Placeholder for last computed position IDs (for testing)
@@ -600,32 +891,109 @@ class TemporalSpikeProcessor(nn.Module):
         # Optional token-cache for incremental (turn-by-turn) usage
         self._token_cache_input_ids = None
         self._token_cache_attention_mask = None
-        # Learnable scalar to align student logit magnitudes with ANN teacher during distillation
-        self.logit_scale = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+        # Learnable scalar to align student logit magnitudes with ANN teacher during
+        # distillation. Created in the inner model's dtype so wrapping a fp16/bf16 model
+        # does not introduce a lone float32 parameter.
+        _ref = next(snn_model.parameters(), None)
+        self.logit_scale = nn.Parameter(
+            torch.tensor(1.0, dtype=_ref.dtype if _ref is not None else torch.float32)
+        )
         # logger.info(f"Created temporal spike processor with T={T}, max_context_length={max_context_length}, device={self.device}")
     
+    @property
+    def device(self):
+        """Device the inner model currently lives on."""
+        for param in self.snn_model.parameters():
+            return param.device
+        for buf in self.snn_model.buffers():
+            return buf.device
+        return torch.device("cpu")
+
+    def _max_position_embeddings(self):
+        """Positional capacity of the inner model, or None when it has no limit."""
+        config = getattr(self.snn_model, 'config', None)
+        if config is None:
+            return None
+        max_pos = getattr(config, 'max_position_embeddings', None)
+        if max_pos is None:
+            max_pos = getattr(config, 'n_positions', None)
+        return int(max_pos) if max_pos else None
+
+    def _context_limit(self):
+        """
+        Largest context this processor may feed the inner model.
+
+        Bounded by BOTH the configured max_context_length and the model's positional
+        capacity: exceeding the latter makes the position embedding lookup raise
+        `IndexError: index out of range in self`.
+        """
+        limit = int(self.max_context_length)
+        max_pos = self._max_position_embeddings()
+        if max_pos:
+            limit = min(limit, max_pos)
+        return max(1, limit)
+
+    @staticmethod
+    def _cache_length(past_key_values):
+        """Number of cached positions, or 0 when there is no usable cache."""
+        try:
+            return int(past_key_values[0][0].size(-2))
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _trim_cache(past_key_values, keep):
+        """
+        Drop the oldest entries so at most `keep` cached positions remain.
+
+        Trimming from the left keeps the cache aligned with a left-truncated context
+        window and stops `past_length` from growing past the model's position limit.
+        """
+        if keep <= 0:
+            return None
+        trimmed = []
+        for layer in past_key_values:
+            key, value = layer[0], layer[1]
+            trimmed.append((key[..., -keep:, :], value[..., -keep:, :]))
+        return trimmed
+
     def _create_position_ids(self, input_shape, past_length=0):
         """
         HF-style position ID creation with cache support.
         Aligns with HuggingFace's create_position_ids_from_input_ids method.
         """
         batch_size, seq_length = input_shape
-        
+
         # Create position IDs that continue from past_length
         position_ids = torch.arange(
-            past_length, 
-            past_length + seq_length, 
+            past_length,
+            past_length + seq_length,
             dtype=torch.long,
             device=self.device
         ).unsqueeze(0)
-        
+
         # Apply clamping with fallback for models using relative position embeddings
-        max_pos = getattr(self.snn_model.config, 'max_position_embeddings', 32768)
+        max_pos = self._max_position_embeddings() or 32768
         position_ids = position_ids.clamp(0, max_pos-1)
-            
+
         # Expand to match batch size
         return position_ids.expand(batch_size, -1)
-    
+
+    def _accepts_position_ids(self):
+        """Whether the inner model's forward takes an explicit `position_ids` kwarg."""
+        cached = getattr(self, "_position_ids_supported", None)
+        if cached is None:
+            try:
+                params = inspect.signature(self.snn_model.forward).parameters
+                cached = "position_ids" in params or any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+                )
+            except (TypeError, ValueError):
+                cached = False
+            self._position_ids_supported = bool(cached)
+        return self._position_ids_supported
+
+
     def forward(self, input_ids, attention_mask=None, use_cache=True, batch_ids=None, incremental=False, **kwargs):
         """
         Process input through the SNN model using temporal processing with batch support.
@@ -640,7 +1008,17 @@ class TemporalSpikeProcessor(nn.Module):
         Returns:
             Tensor with accumulated logits
         """
+        if input_ids.dim() != 2:
+            raise ValueError(
+                f"input_ids must be [batch, seq_len]; got shape {tuple(input_ids.shape)}"
+            )
         batch_size, seq_length = input_ids.shape
+        if seq_length == 0:
+            # Previously this failed deep inside a reshape with an opaque message.
+            raise ValueError("input_ids has sequence length 0; nothing to process.")
+        # Length the caller asked about. `seq_length` is rebound below when the context
+        # is truncated, so keep the original for restoring the output shape at the end.
+        original_seq_length = seq_length
 
         # Optional incremental token cache behavior for multi-turn state retention
         if incremental:
@@ -659,22 +1037,26 @@ class TemporalSpikeProcessor(nn.Module):
                     self._token_cache_attention_mask = torch.cat([self._token_cache_attention_mask, add_mask], dim=1)
 
             # Enforce max context length on the cache
-            if self._token_cache_input_ids.size(1) > self.max_context_length:
-                self._token_cache_input_ids = self._token_cache_input_ids[:, -self.max_context_length:]
+            token_cache_limit = self._context_limit()
+            if self._token_cache_input_ids.size(1) > token_cache_limit:
+                self._token_cache_input_ids = self._token_cache_input_ids[:, -token_cache_limit:]
                 if self._token_cache_attention_mask is not None:
-                    self._token_cache_attention_mask = self._token_cache_attention_mask[:, -self.max_context_length:]
+                    self._token_cache_attention_mask = self._token_cache_attention_mask[:, -token_cache_limit:]
 
             # Use cached full context for the actual forward pass
             input_ids = self._token_cache_input_ids
             attention_mask = self._token_cache_attention_mask
             batch_size, seq_length = input_ids.shape
         
-        # Ensure input doesn't exceed max context length
-        if seq_length > self.max_context_length:
-            logger.warning(f"Input sequence length {seq_length} exceeds max context length {self.max_context_length}. Truncating.")
-            input_ids = input_ids[:, -self.max_context_length:]
+        # Ensure input doesn't exceed the usable context. The bound is the smaller of the
+        # configured max_context_length and the model's positional capacity — feeding
+        # positions beyond the latter raises IndexError inside the embedding lookup.
+        context_limit = self._context_limit()
+        if seq_length > context_limit:
+            logger.warning(f"Input sequence length {seq_length} exceeds max context length {context_limit}. Truncating.")
+            input_ids = input_ids[:, -context_limit:]
             if attention_mask is not None:
-                attention_mask = attention_mask[:, -self.max_context_length:]
+                attention_mask = attention_mask[:, -context_limit:]
             batch_size, seq_length = input_ids.shape
         
         # In Loihi mode, avoid HuggingFace KV-cache semantics; rely on token cache / sequential processing instead.
@@ -713,35 +1095,73 @@ class TemporalSpikeProcessor(nn.Module):
                 if total_layers is None:
                     total_layers = getattr(self.snn_model.config, 'n_layer', 0)
 
-            for layer_idx in range(total_layers):
-                key_layer = []
-                value_layer = []
-                # Collect keys and values for each batch item
-                for batch_idx, batch_cache in enumerate(past_key_values_list):
-                    if batch_cache is not None:
-                        # Use the cache for this conversation
+            # The per-conversation caches can only be batched when they all cover the same
+            # number of positions. Concatenating a zero-length placeholder (a conversation
+            # with no cache yet) with a populated one raised "Sizes of tensors must match
+            # except in dimension 0" from torch.cat, so any batch mixing a fresh
+            # conversation with an ongoing one crashed.
+            cache_lengths = {
+                (c[0][0].size(-2) if c is not None else 0) for c in past_key_values_list
+            }
+            if len(cache_lengths) > 1:
+                logger.warning(
+                    f"Conversations in this batch have different cache lengths {sorted(cache_lengths)}; "
+                    "processing them without a KV cache for this step."
+                )
+                past_key_values = None
+            elif cache_lengths == {0}:
+                past_key_values = None
+            else:
+                for layer_idx in range(total_layers):
+                    key_layer = []
+                    value_layer = []
+                    # Collect keys and values for each batch item
+                    for batch_idx, batch_cache in enumerate(past_key_values_list):
                         key_layer.append(batch_cache[layer_idx][0])
                         value_layer.append(batch_cache[layer_idx][1])
-                    else:
-                        # Create empty tensors for conversations without cache
-                        num_heads = getattr(self.snn_model.config, 'num_attention_heads', getattr(self.snn_model.config, 'n_head', 1))
-                        head_dim = self.snn_model.config.hidden_size // num_heads if num_heads > 0 else self.snn_model.config.hidden_size
-                        # Correct key/value shape: (batch, num_heads, seq_len(0), head_dim)
-                        empty_key = torch.zeros((1, num_heads, 0, head_dim), device=self.device)
-                        empty_value = torch.zeros_like(empty_key)
-                        key_layer.append(empty_key)
-                        value_layer.append(empty_value)
-                # Stack along batch dimension
-                keys = torch.cat(key_layer, dim=0)
-                values = torch.cat(value_layer, dim=0)
-                past_key_values.append((keys, values))
-            # After constructing, check if they contain any non-zero sequence length
-            if all(k.size(-2) == 0 for k, _ in past_key_values):
-                past_key_values = None
+                    # Stack along batch dimension
+                    keys = torch.cat(key_layer, dim=0)
+                    values = torch.cat(value_layer, dim=0)
+                    past_key_values.append((keys, values))
         else:
             # Standard non-batched processing using global KV cache
             past_key_values = self.kv_cache if use_cache else None
-        
+
+        # Keep the KV cache inside the context window. Truncating input_ids alone left the
+        # cache growing by one position per call forever: it silently exceeded
+        # max_context_length and then crashed with "index out of range in self" once
+        # past_length reached the model's max_position_embeddings. The cache must also stay
+        # a strict prefix of the current input, otherwise the model is fed only its last
+        # token against an unrelated history.
+        # A cache built for a different batch size cannot be reused: concatenating it with
+        # the new keys raised a bare "Sizes of tensors must match except in dimension 2"
+        # from inside attention. Drop it instead.
+        if past_key_values is not None:
+            try:
+                cache_batch = int(past_key_values[0][0].size(0))
+            except Exception:
+                cache_batch = batch_size
+            if cache_batch != batch_size:
+                logger.warning(
+                    f"Discarding KV cache built for batch size {cache_batch}; "
+                    f"this call has batch size {batch_size}."
+                )
+                past_key_values = None
+                if batch_ids is None:
+                    self.kv_cache = None
+
+        if past_key_values is not None:
+            cache_len = self._cache_length(past_key_values)
+            max_cache = min(context_limit - 1, seq_length - 1)
+            if cache_len > max_cache:
+                logger.debug(
+                    f"Trimming KV cache from {cache_len} to {max(max_cache, 0)} entries "
+                    f"(context limit {context_limit}, current input {seq_length})."
+                )
+                past_key_values = self._trim_cache(past_key_values, max_cache)
+                if batch_ids is None:
+                    self.kv_cache = past_key_values
+
         # Reset all neuron states in the model before processing
         functional.reset_net(self.snn_model)
         
@@ -750,6 +1170,9 @@ class TemporalSpikeProcessor(nn.Module):
         present_key_values = None
         
         effective_T = max(1, int(self.T))
+        if int(self.T) < 1:
+            # Silently running one timestep for T<=0 hid a misconfigured caller.
+            logger.warning(f"T={self.T} is not a valid timestep count; running with T=1.")
         for _ in range(effective_T):
             # Allow gradients when caller enables them (needed for distillation / adapter finetune).
             # Do not wrap in torch.no_grad(); the caller controls grad mode.
@@ -766,22 +1189,42 @@ class TemporalSpikeProcessor(nn.Module):
                 and past_key_values[0][0] is not None
             )
             model_input_ids = input_ids  # By default feed full sequence
+            past_length = 0
             if using_kv_cache:
-                # Only feed the NEW tokens to the model to avoid size mismatch
-                past_length = past_key_values[0][0].size(-2)
-                if seq_length > past_length:
-                    model_input_ids = input_ids[:, past_length:]
-                else:
-                    # Fallback: at least feed the last token
-                    model_input_ids = input_ids[:, -1:]
+                # Only feed the NEW tokens to the model to avoid size mismatch. The cache
+                # was trimmed above so it is always a strict prefix of `input_ids`.
+                past_length = min(self._cache_length(past_key_values), max(seq_length - 1, 0))
+                model_input_ids = input_ids[:, past_length:]
             # -----------------------------------------------------------------
 
             # Ensure attention_mask is valid
             if attention_mask is None:
                 attention_mask = torch.ones((batch_size, seq_length), dtype=torch.long, device=input_ids.device)
 
+            # The mask must cover cached + new positions; keep it aligned with the window
+            # actually being attended over.
+            expected_mask_len = past_length + model_input_ids.size(1)
+            if attention_mask.dim() == 2 and attention_mask.size(1) != expected_mask_len:
+                if attention_mask.size(1) > expected_mask_len:
+                    attention_mask = attention_mask[:, -expected_mask_len:]
+                else:
+                    pad = torch.ones(
+                        (attention_mask.size(0), expected_mask_len - attention_mask.size(1)),
+                        dtype=attention_mask.dtype,
+                        device=attention_mask.device,
+                    )
+                    attention_mask = torch.cat([pad, attention_mask], dim=1)
+
             # Add attention mask to kwargs
             model_kwargs["attention_mask"] = attention_mask
+
+            # Pass explicit, clamped position IDs. Without this the inner model derives
+            # them from the cache length alone, with nothing keeping them below
+            # max_position_embeddings (_create_position_ids existed but was never called).
+            if self._accepts_position_ids():
+                model_kwargs["position_ids"] = self._create_position_ids(
+                    (model_input_ids.size(0), model_input_ids.size(1)), past_length=past_length
+                )
 
             # Always pass an explicit use_cache. If we leave it unset the inner HF model
             # falls back to config.use_cache (usually True) and builds its own cache
@@ -844,30 +1287,32 @@ class TemporalSpikeProcessor(nn.Module):
         except Exception:
             self._last_position_ids = None
         
-        # Scale accumulated spikes to restore original logit magnitudes
-        # SNN conversion typically reduces magnitudes significantly, so we need strong scaling
+        # Scale accumulated spikes to restore original logit magnitudes.
+        # SNN conversion typically reduces magnitudes significantly, so we need strong scaling.
+        #
+        # `effective_T >= 1`, so the timestep loop above always runs at least once and
+        # always assigns spike_accum. The former `if spike_accum is None:` branch —
+        # which fabricated a zero logit tensor from config.vocab_size — was therefore
+        # unreachable, and would have silently returned all-zero logits if it ever ran.
+        # Fail loudly instead of inventing an output.
         if spike_accum is None:
-            vocab = getattr(self.snn_model.config, "vocab_size", None)
-            if vocab is None:
-                raise RuntimeError("TemporalSpikeProcessor could not produce logits and vocab_size is unknown.")
-            final_logits = torch.zeros(
-                (batch_size, seq_length, vocab),
-                device=input_ids.device,
-                dtype=torch.float32,
+            raise RuntimeError(
+                "TemporalSpikeProcessor produced no logits: the timestep loop did not run "
+                f"(T={self.T}, effective_T={effective_T}). This should be impossible."
             )
-        else:
-            final_logits = spike_accum / effective_T  # Normalize accumulated spikes by timestep count
+        final_logits = spike_accum / effective_T  # Normalize accumulated spikes by timestep count
 
         # Apply learnable logit scaling (helps distillation/parity)
         final_logits = final_logits * self.logit_scale.to(dtype=final_logits.dtype)
 
-        # Ensure logits sequence length matches original input_ids length so downstream
-        # tests that compare shapes do not fail, even if internal model shortened due to
-        # context handling.
-        if final_logits.shape[1] != seq_length:
-            if final_logits.shape[1] < seq_length:
+        # Ensure logits sequence length matches the ORIGINAL input_ids length so callers
+        # comparing shapes do not fail, even if the model shortened the sequence via
+        # context truncation or KV-cache reuse. `seq_length` is rebound by truncation, so
+        # comparing against it silently returned a shorter tensor than the caller passed.
+        if final_logits.shape[1] != original_seq_length:
+            if final_logits.shape[1] < original_seq_length:
                 # Left-pad with zeros (model ignored some positions)
-                pad_len = seq_length - final_logits.shape[1]
+                pad_len = original_seq_length - final_logits.shape[1]
                 pad_tensor = torch.zeros(
                     final_logits.size(0), pad_len, final_logits.size(-1),
                     dtype=final_logits.dtype, device=final_logits.device
@@ -958,22 +1403,37 @@ def parse_args():
                         help='Device to use for conversion')
     parser.add_argument('--max_context_length', type=int, default=512,
                         help='Maximum context length for the model')
+    parser.add_argument('--real_spiking', action='store_true',
+                        help='Route Q/K/V through LIF neurons and drop softmax in SpikeAttention, '
+                             'so the model performs actual spiking computation and the T-timestep '
+                             'loop is no longer a no-op. Changes the outputs; measure the cost.')
+    parser.add_argument('--calibrate_timesteps', action='store_true',
+                        help='After conversion, halve T and rescale LIF thresholds accordingly. '
+                             'Off by default so --timesteps is honoured exactly.')
     return parser.parse_args()
 
-def replace_gelu_with_relu(model):
-    """Replace GeLU activations with ReLU for SNN compatibility."""
-    logger.info("Replacing GeLU activations with ReLU")
-    gelu_count = 0
-    gelu_new_count = 0
+# Smooth activations that an ANN->SNN conversion has to replace with ReLU. GELU covers the
+# GPT-2 family; SiLU/Swish covers Llama-family models such as SmolLM2, which have no GELU
+# at all — so a GELU-only matcher silently replaced nothing on the second architecture this
+# repo advertises, while still reporting a replacement count of 0 as success.
+SMOOTH_ACTIVATION_CLASS_NAMES = {
+    "GELU", "GELUActivation", "NewGELUActivation", "FastGELUActivation", "QuickGELUActivation",
+    "SiLU", "SiLUActivation", "SwishActivation",
+}
 
-    # Replace any GELU-family activation module by swapping it out on its parent.
+
+def replace_smooth_activations_with_relu(model):
+    """Replace GELU/SiLU-family activations with ReLU for SNN compatibility."""
+    logger.info("Replacing smooth activations (GELU/SiLU family) with ReLU")
+    replaced_by_class = {}
+
+    # Replace any smooth activation module by swapping it out on its parent.
     # Iterate over a snapshot so mutating the module tree mid-iteration is safe, and
     # use proper parent-setattr replacement. Reassigning `mod.__class__` in place left
     # a torch.nn.ReLU instance without an `inplace` attribute, which raises
     # AttributeError on the next forward.
-    gelu_class_names = {"GELU", "GELUActivation", "NewGELUActivation", "FastGELUActivation", "QuickGELUActivation"}
     for name, mod in list(model.named_modules()):
-        if mod.__class__.__name__ not in gelu_class_names:
+        if mod.__class__.__name__ not in SMOOTH_ACTIVATION_CLASS_NAMES:
             continue
         path = name.split('.')
         child_name = path[-1]
@@ -988,17 +1448,34 @@ def replace_gelu_with_relu(model):
         else:
             # Model itself is the activation (unusual); nothing to reparent.
             continue
-        if mod.__class__.__name__ == "NewGELUActivation":
-            gelu_new_count += 1
-        else:
-            gelu_count += 1
+        cls_name = mod.__class__.__name__
+        replaced_by_class[cls_name] = replaced_by_class.get(cls_name, 0) + 1
 
     # Update config if it exists
     if hasattr(model, 'config') and hasattr(model.config, 'activation_function'):
         model.config.activation_function = "relu"
-    
-    logger.info(f"Replaced {gelu_count} GELU and {gelu_new_count} NewGELUActivation modules with ReLU")
+    if hasattr(model, 'config') and hasattr(model.config, 'hidden_act'):
+        model.config.hidden_act = "relu"
+
+    total = sum(replaced_by_class.values())
+    if total == 0:
+        present = sorted({
+            type(m).__name__ for _n, m in model.named_modules()
+            if "Act" in type(m).__name__ or type(m).__name__ in ("SiLU", "GELU", "ReLU", "Tanh")
+        })
+        logger.warning(
+            "No smooth activation modules were replaced. "
+            f"Activation modules present: {present or 'none (activation may be applied functionally)'}. "
+            "The model's activations are unchanged."
+        )
+    else:
+        logger.info(f"Replaced {total} activation module(s) with ReLU: {replaced_by_class}")
     return model
+
+
+def replace_gelu_with_relu(model):
+    """Backwards-compatible alias for :func:`replace_smooth_activations_with_relu`."""
+    return replace_smooth_activations_with_relu(model)
 
 def create_calibration_data(tokenizer, num_samples=10, max_length=128):
     """Create simple calibration data for SNN conversion."""
@@ -1045,6 +1522,89 @@ def create_calibration_data(tokenizer, num_samples=10, max_length=128):
     
     return calib_data_list
 
+def _match_module_dtype_device(new_module: nn.Module, reference: nn.Module) -> nn.Module:
+    """
+    Cast a replacement module to the dtype/device of the module it replaces.
+
+    Replacement modules (SpikeLayerNorm, SpikeAttention, LoihiCausalContextMixer) build
+    their parameters with torch's float32 default, and `Tensor.copy_` keeps the
+    destination dtype. Converting a fp16/bf16 model therefore silently promoted every
+    replaced layer to float32 — doubling the memory of exactly the large models this
+    repo targets.
+    """
+    ref_param = next(reference.parameters(), None)
+    if ref_param is None:
+        ref_param = next(reference.buffers(), None)
+    if ref_param is None:
+        return new_module
+    return new_module.to(device=ref_param.device, dtype=ref_param.dtype)
+
+
+@torch.no_grad()
+def calibrate_spike_attention(model, batches):
+    """
+    Set each SpikeAttention's Q/K/V spike thresholds from observed activation magnitude.
+
+    A rate code maps input magnitude onto a firing rate that saturates once the input
+    reaches threshold. A fixed threshold therefore either saturates (every neuron fires
+    every step, carrying nothing) or never fires, depending on how the model's activations
+    happen to be scaled. This is the threshold-balancing step of Diehl et al. (2015).
+
+    Runs with spiking temporarily disabled so statistics come from the real activation
+    distribution rather than an already-degraded one. Returns the number of modules
+    calibrated.
+    """
+    targets = [m for m in model.modules() if isinstance(m, SpikeAttention)]
+    if not targets:
+        return 0
+
+    observed = {id(m): [] for m in targets}
+    handles, saved = [], {}
+
+    for module in targets:
+        saved[id(module)] = module.spiking
+        module.spiking = False
+
+        def make(mod):
+            def capture(_m, _inp, out):
+                # out is (attn_output, ...); recompute Q/K/V magnitudes from the input.
+                hidden = _inp[0]
+                for slot, proj in enumerate((mod.q_proj, mod.k_proj, mod.v_proj)):
+                    flat = proj(hidden).detach().abs().flatten().float()
+                    if flat.numel() > 100_000:
+                        idx = torch.randperm(flat.numel(), device=flat.device)[:100_000]
+                        flat = flat[idx]
+                    if flat.numel():
+                        observed[id(mod)].append((slot, torch.quantile(flat, 0.99).item()))
+            return capture
+
+        handles.append(module.register_forward_hook(make(module)))
+
+    was_training = model.training
+    model.eval()
+    try:
+        for batch in batches:
+            model(batch)
+    finally:
+        for handle in handles:
+            handle.remove()
+        for module in targets:
+            module.spiking = saved[id(module)]
+        if was_training:
+            model.train()
+
+    for module in targets:
+        per_slot = {0: [], 1: [], 2: []}
+        for slot, value in observed[id(module)]:
+            per_slot[slot].append(value)
+        for slot, values in per_slot.items():
+            if values:
+                module.qkv_threshold[slot] = sum(values) / len(values)
+
+    logger.info("Calibrated Q/K/V spike thresholds on %d SpikeAttention module(s)", len(targets))
+    return len(targets)
+
+
 def replace_layernorm_with_spikelayernorm(model):
     """Replace LayerNorm with spike-compatible SpikeLayerNorm."""
     logger.info("Replacing LayerNorm with spike-compatible SpikeLayerNorm")
@@ -1053,19 +1613,41 @@ def replace_layernorm_with_spikelayernorm(model):
     # Find and replace layer norms. Snapshot the module list first so replacing
     # submodules mid-iteration cannot disturb the traversal.
     for name, module in list(model.named_modules()):
-        if isinstance(module, nn.LayerNorm):
-            shape = module.normalized_shape
-            new_ln = SpikeLayerNorm(shape, module.eps)
-            
-            # Copy parameters
-            new_ln.weight.data.copy_(module.weight.data)
-            new_ln.bias.data.copy_(module.bias.data)
+        is_layernorm = isinstance(module, nn.LayerNorm)
+        # RMSNorm is not an nn.LayerNorm subclass and has no shared base class across
+        # architectures, so match by name. Llama, Mistral, Qwen and Gemma all end in
+        # "RMSNorm"; requiring a `weight` guards against matching an unrelated class.
+        is_rmsnorm = (
+            not is_layernorm
+            and type(module).__name__.endswith("RMSNorm")
+            and getattr(module, "weight", None) is not None
+        )
+        if is_layernorm or is_rmsnorm:
+            if is_rmsnorm:
+                eps = getattr(module, "variance_epsilon", None)
+                if eps is None:
+                    eps = getattr(module, "eps", 1e-6)
+                new_ln = SpikeRMSNorm(module.weight.shape[0], eps)
+                new_ln.weight.data.copy_(module.weight.data)
+            else:
+                shape = module.normalized_shape
+                new_ln = SpikeLayerNorm(shape, module.eps)
+
+                # Copy parameters. LayerNorm(elementwise_affine=False) has weight/bias set
+                # to None, which raised "'NoneType' object has no attribute 'data'"; fall
+                # back to the identity affine SpikeLayerNorm is constructed with.
+                if getattr(module, "weight", None) is not None:
+                    new_ln.weight.data.copy_(module.weight.data)
+                if getattr(module, "bias", None) is not None:
+                    new_ln.bias.data.copy_(module.bias.data)
             
             # Find parent module
             path = name.split('.')
             parent_path = '.'.join(path[:-1])
             child_name = path[-1]
             
+            new_ln = _match_module_dtype_device(new_ln, module)
+
             if parent_path:
                 parent = model
                 for attr in parent_path.split('.'):
@@ -1076,12 +1658,33 @@ def replace_layernorm_with_spikelayernorm(model):
             
             ln_count += 1
     
-    logger.info(f"Replaced {ln_count} LayerNorm modules with SpikeLayerNorm")
+    if ln_count == 0:
+        other_norms = sorted({
+            type(m).__name__ for _n, m in model.named_modules() if "Norm" in type(m).__name__
+        })
+        logger.warning(
+            "No normalization modules were replaced. "
+            + (
+                f"This model normalises with {other_norms}, which this pass does not handle, "
+                "so normalization was left unchanged."
+                if other_norms else "The model has no recognisable normalization layers."
+            )
+        )
+    else:
+        logger.info(f"Replaced {ln_count} normalization module(s) "
+                    f"with spike-compatible equivalents")
     return model
 
-def replace_attention_with_spikeattention(model):
-    """Replace self-attention mechanisms with spike-compatible versions."""
-    logger.info("Replacing attention blocks with SpikeAttention")
+def replace_attention_with_spikeattention(model, spiking=False):
+    """
+    Replace self-attention mechanisms with spike-compatible versions.
+
+    `spiking=True` routes Q/K/V through LIF neurons and drops softmax (see
+    SpikeAttention). Default False keeps the numerically faithful path.
+    """
+    logger.info(
+        f"Replacing attention blocks with SpikeAttention (spiking={'on' if spiking else 'off'})"
+    )
     attn_count = 0
     
     # Detect model architecture type for appropriate attention handling
@@ -1103,12 +1706,9 @@ def replace_attention_with_spikeattention(model):
         num_kv_heads = getattr(model.config, 'num_key_value_heads', num_heads)
 
         if num_kv_heads != num_heads:
-            # Grouped-query attention: q_proj and k/v_proj have different output dims and
-            # SpikeAttention assumes full multi-head (q==kv heads). Refuse honestly rather
-            # than silently copying mismatched weights.
-            raise NotImplementedError(
-                f"Grouped-query attention (num_key_value_heads={num_kv_heads} != "
-                f"num_attention_heads={num_heads}) is not supported by SpikeAttention yet."
+            logger.info(
+                f"Grouped-query attention: {num_heads} query heads, {num_kv_heads} key/value "
+                "heads. K/V are repeated to match Q inside SpikeAttention."
             )
 
         logger.warning(
@@ -1126,8 +1726,19 @@ def replace_attention_with_spikeattention(model):
                 num_heads=num_heads,
                 T=model.T if hasattr(model, 'T') else 16,
                 causal=True,
+                # Carry the layer index over so the replacement can update a Cache object.
+                layer_idx=getattr(attn, 'layer_idx', None),
+                num_kv_heads=num_kv_heads,
+                spiking=spiking,
             )
             spike_attn.return_mode = "llama"
+            # Carry over the rotary embedding so Q/K can still be rotated. Newer hosts
+            # pass precomputed cos/sin down to the attention module and this is unused;
+            # older layouts own one per attention block. Losing it means losing all
+            # positional information on Llama-family models, which keep none anywhere else.
+            spike_attn.rotary_emb = getattr(attn, "rotary_emb", None) or getattr(
+                model.model, "rotary_emb", None
+            )
             try:
                 spike_attn.q_proj.weight.data.copy_(attn.q_proj.weight.data)
                 spike_attn.k_proj.weight.data.copy_(attn.k_proj.weight.data)
@@ -1145,7 +1756,7 @@ def replace_attention_with_spikeattention(model):
                         dst.bias.data.zero_()
             except Exception as e:
                 logger.warning(f"Error copying Llama attention weights: {e}. Using default initialization.")
-            layer.self_attn = spike_attn
+            layer.self_attn = _match_module_dtype_device(spike_attn, attn)
             attn_count += 1
 
         if attn_count == 0:
@@ -1171,7 +1782,8 @@ def replace_attention_with_spikeattention(model):
                         embed_dim=hidden_size,
                         num_heads=num_heads,
                         T=model.T if hasattr(model, 'T') else 16,
-                        causal=True
+                        causal=True,
+                        spiking=spiking,
                     )
                     
                     # Store original weights for initialization
@@ -1318,8 +1930,8 @@ def replace_attention_with_spikeattention(model):
                     except Exception as e:
                         logger.warning(f"Error during attention weight copying: {e}. Using default initialization.")
                     
-                    # Replace the attention block
-                    block.attn = spike_attn
+                    # Replace the attention block, keeping the model's dtype/device.
+                    block.attn = _match_module_dtype_device(spike_attn, block.attn)
                     attn_count += 1
         else:
             logger.warning(f"Model has GPT-style architecture but couldn't find transformer.h structure")
@@ -1345,7 +1957,8 @@ def replace_attention_with_spikeattention(model):
                             embed_dim=hidden_size,
                             num_heads=num_heads,
                             T=model.T if hasattr(model, 'T') else 16,
-                            causal=False  # BERT uses bidirectional attention
+                            causal=False,  # BERT uses bidirectional attention
+                            spiking=spiking,
                         )
                         
                         try:
@@ -1471,7 +2084,12 @@ def replace_attention_with_loihi_mixer(model):
             if hidden_size is None:
                 raise RuntimeError("Could not infer hidden_size for Loihi mixer replacement.")
 
-            setattr(parent, child_name, LoihiCausalContextMixer(hidden_size=int(hidden_size)))
+            mixer = LoihiCausalContextMixer(hidden_size=int(hidden_size))
+            # Llama-style decoder layers unpack three values from their attention module;
+            # GPT-2 blocks index the returned tuple. Tell the mixer which layout to emit.
+            if child_name == "self_attn" or 'llama' in model_type or 'mistral' in model_type or 'smollm' in model_type:
+                mixer.return_mode = "llama"
+            setattr(parent, child_name, _match_module_dtype_device(mixer, module))
             replaced_prefixes.append(name)
             attn_count += 1
             logger.info(f"Replaced attention at {name} with LoihiCausalContextMixer")
@@ -1487,7 +2105,7 @@ def replace_attention_with_loihi_mixer(model):
     logger.info(f"Replaced {attn_count} attention blocks with LoihiCausalContextMixer")
     return model
 
-def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
+def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False, real_spiking=False):
     """Perform simplified conversion without relying on SpikingJelly.
 
     Args:
@@ -1496,7 +2114,25 @@ def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
         skip_gelu_replacement: If True, skip GELU->ReLU replacement. This preserves
             text generation quality but sacrifices spike-compatibility. Set to True
             for inference testing; set to False for actual neuromorphic deployment.
+        real_spiking: If True, SpikeAttention routes Q/K/V through its LIF neurons and
+            drops softmax, so the model performs actual spiking computation and the
+            T-timestep loop stops being a no-op. Off by default: it changes the model's
+            outputs, and the cost should be measured (see spike_metrics.py and the
+            three-way fidelity comparison) before relying on it.
+
+    Passing an already-converted model returns it with T updated rather than converting
+    again: re-wrapping nests T x T timestep loops, applies the logit scaling twice, and
+    makes the inner cache grow by T positions per call. It previously failed with a
+    misleading "Could not find compatible attention structure" from the attention pass.
     """
+    if isinstance(model, TemporalSpikeProcessor):
+        logger.warning(
+            "simplified_conversion() received an already-converted TemporalSpikeProcessor; "
+            f"updating T to {timesteps} instead of converting again."
+        )
+        model.T = timesteps
+        return model
+
     logger.info(f"Using simplified conversion with T={timesteps}")
 
     # 1. Optionally replace GELU/NewGELUActivation with ReLU
@@ -1530,7 +2166,7 @@ def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False):
             logger.info("Loihi quantize enabled: applying fake int8 quantization pass")
             model = apply_fake_int8_quantization_for_loihi(model)
     else:
-        model = replace_attention_with_spikeattention(model)
+        model = replace_attention_with_spikeattention(model, spiking=real_spiking)
     
     # 5. Add a wrapper for temporal processing
     model = TemporalSpikeProcessor(model, T=timesteps)
@@ -1623,14 +2259,36 @@ def save_snn_model(model, tokenizer, path):
     if config is None:
         config = getattr(getattr(model, 'snn_model', None), 'config', None)
 
-    # Extract/create metadata
+    # Extract/create metadata.
+    #
+    # These fields used to be hardcoded ("relu"/"atan"/is_snn=True) regardless of what the
+    # conversion actually produced: a model converted with skip_gelu_replacement=True (the
+    # default in the test harness) still kept its GELU activations, and a model whose
+    # surrogate gradients were never applied still claimed "atan". Measure instead.
+    activation_classes = sorted({
+        type(m).__name__ for _n, m in model.named_modules()
+        if type(m).__name__ in ("GELU", "GELUActivation", "NewGELUActivation", "ReLU", "SiLU", "SiLUActivation")
+    })
+    spiking_neurons = [
+        _n for _n, m in model.named_modules()
+        if isinstance(m, LIFNode) or type(m).__name__ in ("IFNode", "DLPFCAdExNeuron")
+    ]
+    surrogates = sorted({
+        type(getattr(m, "surrogate_function", None)).__name__
+        for _n, m in model.named_modules()
+        if getattr(m, "surrogate_function", None) is not None
+    })
+
     snn_config = {
         "timesteps": getattr(model, 'T', 16),
         "base_model": getattr(config, '_name_or_path', "") if config is not None else "",
         "model_type": getattr(config, 'model_type', "") if config is not None else "",
-        "activation": "relu",
-        "surrogate_gradient": "atan",
-        "is_snn": True
+        "activations": activation_classes,
+        "surrogate_gradients": surrogates,
+        "spiking_neuron_count": len(spiking_neurons),
+        # Structural only: the neurons exist. Whether they are on the forward path is
+        # checked by loihi_constraints.validate_loihi_export_readiness(sample_input=...).
+        "has_spiking_modules": bool(spiking_neurons),
     }
 
     # Save tokenizer
@@ -1650,6 +2308,49 @@ def save_snn_model(model, tokenizer, path):
     
     logger.info(f"Saved SNN model to {path}")
     return True
+
+def _apply_official_converter(snn_parts_model, calib_data, args, device):
+    """Run SpikingJelly's ann2snn Converter, falling back to the prepared model."""
+    logger.info(f"Applying official SpikingJelly Converter (T={args.timesteps})...")
+
+    # Create a simple dataloader for the SpikingJelly Converter
+    from torch.utils.data import DataLoader, Dataset
+    class CalibrationDataset(Dataset):
+        def __init__(self, calib_data_list):
+            self.data = calib_data_list
+        def __len__(self):
+            return len(self.data)
+        def __getitem__(self, idx):
+            # SpikingJelly converter expects input tensor directly, not dict or tuple usually
+            sample_dict, _ = self.data[idx]
+            return sample_dict['input_ids'].squeeze(0) # Return tensor [seq_len]
+
+    if calib_data:
+        sj_calib_dataset = CalibrationDataset(calib_data)
+        # SpikingJelly converter usually expects batch_size 1 for this type of calibration data
+        sj_calib_dataloader = DataLoader(sj_calib_dataset, batch_size=1) 
+    else:
+        sj_calib_dataloader = None
+        logger.warning("No calibration data for SpikingJelly Converter. Some features might not work optimally.")
+
+    try:
+        # Converter is the class from direct import. Its signature is
+        # (dataloader, device=None, mode='Max', momentum=0.1, fuse_flag=True) — there is
+        # no `spiking_neuron_type` parameter, and passing one raised TypeError before any
+        # conversion happened, so this branch always fell through to the except below.
+        converter_instance = Converter(
+            dataloader=sj_calib_dataloader,
+            mode='max',
+            device=device,
+        )
+        converted_snn_model = converter_instance(snn_parts_model)
+        logger.info("Official SpikingJelly Converter applied.")
+    except Exception as e:
+        logger.error(f"Official SpikingJelly Converter failed: {e}. Using model from simplified_conversion.")
+        converted_snn_model = snn_parts_model 
+    
+    return converted_snn_model
+
 
 def main():
     """Main conversion function."""
@@ -1724,7 +2425,9 @@ def main():
 
     logger.info(f"Converting to SNN components with T={args.timesteps} (simplified_conversion wrapper)...")
     # simplified_conversion prepares the model by replacing layers, sets model.T
-    snn_parts_model = simplified_conversion(model_for_snn, args.timesteps)
+    snn_parts_model = simplified_conversion(
+        model_for_snn, args.timesteps, real_spiking=getattr(args, 'real_spiking', False)
+    )
 
     logger.info("Applying surrogate gradients using official SpikingJelly ATan...")
     snn_parts_model = apply_surrogate_gradients(snn_parts_model, alpha=4.0)
@@ -1733,46 +2436,16 @@ def main():
     # (e.g. data-based scaling, specific layer replacements it handles beyond simplified_conversion)
     # If simplified_conversion already does everything, this Converter step might be redundant or for refinement.
     # The prompt implied using official Converter. Let's assume it applies some final touches.
-    logger.info(f"Applying official SpikingJelly Converter (T={args.timesteps})...")
-    # Converter now comes from direct import and is the official one
-    # It needs calibration data in a specific format (typically a DataLoader)
-    # Our create_calibration_data returns a list of tuples. We might need to adapt.
-    
-    # Create a simple dataloader for the SpikingJelly Converter
-    from torch.utils.data import DataLoader, Dataset
-    class CalibrationDataset(Dataset):
-        def __init__(self, calib_data_list):
-            self.data = calib_data_list
-        def __len__(self):
-            return len(self.data)
-        def __getitem__(self, idx):
-            # SpikingJelly converter expects input tensor directly, not dict or tuple usually
-            sample_dict, _ = self.data[idx]
-            return sample_dict['input_ids'].squeeze(0) # Return tensor [seq_len]
-
-    if calib_data:
-        sj_calib_dataset = CalibrationDataset(calib_data)
-        # SpikingJelly converter usually expects batch_size 1 for this type of calibration data
-        sj_calib_dataloader = DataLoader(sj_calib_dataset, batch_size=1) 
+    # `--simplified` was declared but never read: the official Converter ran on every
+    # invocation regardless of the flag (and then fell back), so the documented
+    # "use simplified conversion (no SpikingJelly)" mode did not exist.
+    if args.simplified:
+        logger.info("--simplified: skipping the official SpikingJelly Converter step.")
+        converted_snn_model = snn_parts_model
     else:
-        sj_calib_dataloader = None
-        logger.warning("No calibration data for SpikingJelly Converter. Some features might not work optimally.")
+        converted_snn_model = _apply_official_converter(snn_parts_model, calib_data, args, device)
 
-    try:
-        # Converter is the class from direct import
-        converter_instance = Converter(
-            mode='max', 
-            dataloader=sj_calib_dataloader, 
-            device=device,
-            spiking_neuron_type='LIFNode', 
-        )
-        converted_snn_model = converter_instance(snn_parts_model) 
-        logger.info("Official SpikingJelly Converter applied.")
-    except Exception as e:
-        logger.error(f"Official SpikingJelly Converter failed: {e}. Using model from simplified_conversion.")
-        converted_snn_model = snn_parts_model 
-    
-    # Wrap with TemporalSpikeProcessor for multi-step processing.
+        # Wrap with TemporalSpikeProcessor for multi-step processing.
     # simplified_conversion() already returns a TemporalSpikeProcessor, so re-wrapping
     # would nest T x T timestep loops and apply the logit scaling twice. Only wrap when
     # the SpikingJelly Converter step replaced it with a bare model.
@@ -1787,8 +2460,10 @@ def main():
         final_snn_model = TemporalSpikeProcessor(converted_snn_model, T=args.timesteps, max_context_length=max_context)
     final_snn_model.to(device)
 
-    if args.timesteps > 16: # Example: further calibrate if initial T is large
-        target_T = args.timesteps // 2
+    # Timestep calibration halves T, so leaving it on by default meant `--timesteps 32`
+    # silently produced a model running at T=16. It is now opt-in.
+    if getattr(args, 'calibrate_timesteps', False) and args.timesteps > 1:
+        target_T = max(1, args.timesteps // 2)
         logger.info(f"Calibrating SNN timesteps: {args.timesteps} -> {target_T}")
         final_snn_model = calibrate_timesteps(final_snn_model, args.timesteps, target_T)
     

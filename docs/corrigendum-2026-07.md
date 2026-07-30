@@ -1,0 +1,113 @@
+# Corrigendum — STAC V1 spiking pathway was inactive as released
+
+**Date:** 2026-07
+**Affects:** STAC V1 (`stac_v1/`, and the `stac-v1/stacv1.ipynb` notebook it was
+consolidated from) in every release up to and including `3.0.0-beta`.
+**Does not affect:** STAC V2, its conversion pipeline, or its reported latency figures.
+
+---
+
+## Summary
+
+In the released STAC V1 implementation, the AdEx spiking layer emitted **zero spikes for
+every input**. The component was structurally present, was constructed and invoked on every
+forward pass, and reported no error — but it never fired, and no gradient ever reached it.
+
+Two defects were jointly responsible. Either alone is sufficient to hold spike output at
+zero, and each conceals the other:
+
+**1 · The operating point lay below threshold.** The injected current came from an untrained
+`nn.Linear` over transformer hidden states, giving `I = O(1)`. The AdEx sub-threshold fixed
+point is
+
+```
+V* = V_rest + I / (1 + a)
+```
+
+so firing requires `I ≥ (1 + a)(V_th − V_rest)`. At the shipped parameters
+(`V_th = −50`, `V_rest = −65`, `a = 4.0`) that threshold is **75**, against an observed
+maximum injected current of **2.4**. The membrane settled ~14.7 mV below threshold and
+stayed there.
+
+**2 · The surrogate gradient underflowed.** The backward pass used a unit-width Gaussian
+
+```
+g(x) = exp(−x² / 2) / √(2π),    x = V − V_th  [mV]
+```
+
+The argument is in millivolts while the kernel width is 1. At `|x| ≈ 14.7` the kernel
+evaluates to ≈`3e−48`, below the float32 smallest subnormal (`1.4e−45`), so it truncates to
+**exactly zero**. The Jacobian of the spiking layer was structurally zero, not merely small.
+
+## Why it went unnoticed
+
+The metric that would have exposed this reads zero under both a maximally efficient network
+and a completely silent one. The L1 sparsity term `λ‖S‖₁` evaluated to exactly `0.0`
+throughout training, which is indistinguishable from a perfectly sparse solution unless the
+raw spike count is also inspected. No spike-count telemetry existed at the time.
+
+## Reproduction
+
+`scripts/verify_v1_corrigendum.py` runs the original notebook's neuron and layer code
+verbatim, at its shipped parameters, and reports the spike count:
+
+```bash
+python scripts/verify_v1_corrigendum.py
+```
+
+Observed on the pre-fix code:
+
+| Quantity | Value |
+| --- | --- |
+| Spikes emitted | **0** of 262,144 neuron-timesteps |
+| Membrane potential vs. threshold | 14.70 mV below |
+| Current required to fire | 75.0 (observed max: 2.4) |
+| L1 spike penalty `λ·mean\|S\|` | exactly `0.00000000` |
+| Surrogate gradient at operating point | exactly `0.0` |
+
+## What is and isn't invalidated
+
+**Invalidated** — any claim that STAC V1 demonstrated *functioning* surrogate-gradient
+training of a spiking transformer, that gradients flowed through its spiking neurons, that
+its intrinsic firing properties were fine-tuned, or that its L1 term produced sparse spiking
+activity.
+
+**Not invalidated** — the model still trained. The GPT-2 backbone, the projection layers,
+the HEMM memory bias and the `lm_head` are all differentiable and untouched by these
+defects. Any loss or perplexity figure recorded from V1 is a real measurement of that
+pipeline; it simply owes nothing to the spiking mechanism. The architecture, the training
+pipeline and the HEMM design stand as described.
+
+## Fixes
+
+| Defect | Fix |
+| --- | --- |
+| Sub-threshold operating point | `CurrentDrive` module — `gain·LayerNorm(x) + offset` with `offset = (1+a)(V_th − V_rest)` — centres the population steady state on threshold, so roughly half the neurons are active at initialisation |
+| Surrogate gradient underflow | Gaussian width `σ` tied to `delta_T`, the AdEx model's own exponential-slope factor, so the surrogate's support matches the voltage scale over which the escape rate varies |
+| No spike telemetry | `spike_metrics.py` counts real spikes and synaptic operations per forward pass |
+| No regression guard | `tests/test_v1_baseline.py` asserts against `docs/baselines/stac_v1_smoke.json` |
+
+Post-fix measured behaviour: spike rate **0.147**, sparsity **86.8%**, L1 term
+**1.47e−06** — non-zero, and therefore actually exerting pressure.
+
+## Effect on the accompanying paper
+
+The paper reports **no quantitative STAC V1 results** — no perplexity, no accuracy, no spike
+rates. It claims only "feasibility." No published number requires correction. The
+corrections are confined to statements of mechanism:
+
+| Location | Published claim | Status |
+| --- | --- | --- |
+| Abstract | V1 combined a pretrained transformer with spiking elements "for sparse, event-driven learning" | Intended, not achieved |
+| V1 methodology | "allowing gradients to flow back through the spiking neurons" | Did not occur |
+| V1 methodology | "enabling backpropagation to fine-tune… the neurons' intrinsic firing properties" | Did not occur |
+| V1 methodology | "demonstrated the feasibility of creating a high-performance hybrid SNN transformer" | Overstated: covers pipeline construction, not spiking contribution |
+| Spike regularization | Total loss `L = L_CE + λ‖S‖₁` | Second term evaluated to exactly zero |
+| Initial Results | "the integrated L1 spike regularization used during STAC V1 fine-tuning" | No referent |
+
+### Citation accuracy
+
+The paper cites the V1 implementation as *iLevyTate/stac* **Version 2.0.0.3**. That tag
+(`26e213d`, 2025-07-11) contains no V1 implementation — only `stac-v1/README.md`. The
+notebook `stac-v1/stacv1.ipynb` was committed 2025-07-13 (`7b09d54`), two days after the
+tag. The reference should point at a version that actually contains the artifact.
