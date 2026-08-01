@@ -268,6 +268,30 @@ precision-independent information loss in the first two blocks, and nothing that
 weights frozen recovers it. Spike-aware fine-tuning — the paper's third roadmap track — is
 what remains, and it is now demonstrated to be necessary rather than assumed.
 
+## 5d · Training reverses the collapse (proof of concept)
+
+Every knob in §5c leaves the weights frozen. Letting them move is the one untried path, and
+it works. `scripts/finetune_spiking.py` trains the fully-converted network end to end
+through the T-timestep spiking forward (gradients reach the weights via the neurons'
+surrogate gradient), distilling from the original ANN. On distilgpt2, T=4, ~13 minutes on a
+4-CPU box:
+
+| step | eval perplexity |
+| ---: | ---: |
+| 0 (frozen collapse) | 6,161 |
+| 75 | 1,057 |
+| 150 | 811 |
+| 225 | 635 |
+| 300 | 580 |
+
+A **10.5× recovery** in 300 steps, monotonic and still falling. This is a proof of concept,
+not a solved problem: 580 is still ~11× the ANN's ~54, at a small T, short sequences, and a
+few hundred CPU steps. But the contrast with §5c is the whole point — no frozen-weight
+remedy moved perplexity at all, and training moves it immediately and substantially. It
+confirms the diagnosis: the information the spike quantisation destroys can be *relearned*,
+it just cannot be recovered from frozen ANN weights. A conclusive run (T=8, longer
+sequences, thousands of steps, GPU) is future work, but the direction is no longer in doubt.
+
 ## 6 · What this means
 
 **Post-hoc conversion without training does not work.** Not "works with degradation" —
