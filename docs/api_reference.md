@@ -4,7 +4,9 @@
 
 ### TemporalSpikeProcessor
 
-Main class for multi-turn conversational SNN processing.
+Manages multi-turn state (KV cache, positions, per-conversation batching) for a converted SNN.
+Note: this is the state-management mechanism; conversational quality under genuine spiking
+requires training (see [`coverage-quality.md`](coverage-quality.md)).
 
 ```python
 class TemporalSpikeProcessor(nn.Module):
@@ -100,9 +102,9 @@ converted model.
 **Parameters:**
 - `model` (torch.nn.Module): Source model
 - `timesteps` (int): Number of SNN timesteps
-- `skip_gelu_replacement` (bool): If `True`, skip the GELU→ReLU substitution. This
-  preserves generation quality but is less spike-compatible; set `False` for actual
-  neuromorphic deployment.
+- `skip_gelu_replacement` (bool): If `True`, skip the GELU→ReLU substitution. This keeps the
+  path closer to the ANN (and, combined with spiking off, faithful to it); set `False` for
+  neuromorphic deployment, where quality then depends on training, not conversion alone.
 
 **Returns:**
 - `TemporalSpikeProcessor` wrapping the converted SNN model

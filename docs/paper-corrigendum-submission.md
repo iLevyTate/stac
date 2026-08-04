@@ -134,8 +134,17 @@ V1 fine-tuning" — the comparison has no referent, since that term was identica
 `stac-v1/README.md`. The notebook `stac-v1/stacv1.ipynb` was committed 2025-07-13
 (`7b09d54`), two days after the tag.
 
-**Corrected** — repoint to a version that contains the artifact. Either cite the commit
-directly, or mint a release tag from it and cite that.
+**Corrected** — cite the `4.0.0` release, which contains the V1 implementation (in the
+`stac_v1/` package) and the corrected behaviour described in this corrigendum:
+
+> Tate, L. (2026). STAC: Spiking Transformer Augmenting Cognition (Version 4.0.0) [Computer
+> software]. Zenodo. https://doi.org/10.5281/zenodo.[NEW-VERSION-DOI]
+
+`[NEW-VERSION-DOI]` is the version-specific DOI minted when the v4.0.0 Zenodo deposit is
+published (see the Zenodo runbook). Until then, the concept DOI
+`10.5281/zenodo.18023657` resolves to the latest version and may be used. Optionally add a
+retention note: *"Earlier releases up to 3.0.0-beta contained the inactive V1 spiking pathway
+described above."*
 
 ---
 

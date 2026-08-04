@@ -8,7 +8,7 @@
 STAC (Spiking Transformer Augmenting Cognition) is a research framework that explores two complementary approaches to spiking neural network (SNN) language modeling:
 
 - **STAC V1**: A complete end-to-end training pipeline built around learnable Adaptive Exponential (AdEx) neurons. See `stac_v1/`.
-- **STAC V2**: An experimental conversion framework that transforms pretrained transformer language models (DistilGPT-2, SmolLM2-1.7B-Instruct) into SNNs, targeting potential energy savings while retaining multi-turn conversational ability in simulation.
+- **STAC V2**: An experimental conversion framework that transforms pretrained transformer language models (DistilGPT-2, SmolLM2-1.7B-Instruct) into SNNs. The conversion is numerically faithful with spiking *off*; with spiking *on*, a frozen converted model collapses and needs training to recover — and the projected energy of the current design is worse than the dense ANN. See [`docs/findings-summary.md`](docs/findings-summary.md).
 
 > **Important**: This repository currently runs *software-level* SNN simulations only. No
 > metrics have been collected on physical neuromorphic hardware. Energy figures are
@@ -20,7 +20,7 @@ STAC (Spiking Transformer Augmenting Cognition) is a research framework that exp
 ## Key Features
 
 - Proof-of-concept ANN-to-SNN conversion built on SpikingJelly.
-- Multi-turn context retention via a Temporal Spike Processor.
+- Temporal Spike Processor for multi-turn KV-cache/state management (the mechanism; conversational quality under genuine spiking requires training).
 - Test coverage for position IDs, KV-cache behavior, and spike-rate sanity checks.
 - Hardware power profiling: planned, not yet implemented.
 - Full operator coverage and optimization: work in progress.
@@ -195,7 +195,7 @@ returning to that state.
 
 ## Testing and Validation
 
-The repository includes extensive testing for multi-turn conversational correctness:
+The repository includes tests that pin multi-turn behavior (cache state, position handling, spike rates) — they guard against regressions, they do not by themselves demonstrate conversational quality under genuine spiking:
 
 ```bash
 # Test specific components

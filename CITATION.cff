@@ -1,0 +1,34 @@
+# Structured citation metadata (Citation File Format 1.2.0).
+# GitHub renders this as the repository's "Cite this repository" button.
+#
+# NOTE: `doi` below is the Zenodo *concept* DOI, which always resolves to the latest version.
+# After the v4.0.0 Zenodo deposit is published, you may add the version-specific DOI as an
+# `identifiers:` entry. A book-chapter `preferred-citation:` should be added once the
+# publication fields (title, book, editors, publisher, year, DOI/ISBN) are confirmed — see
+# docs/paper-corrigendum-submission.md.
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "STAC: Spiking Transformer Augmenting Cognition"
+abstract: >-
+  A research framework and study of converting pretrained transformer language models
+  (DistilGPT-2, SmolLM2) into spiking neural networks. Includes a measured account of
+  conversion fidelity, an operation-count energy analysis, evidence that post-hoc conversion
+  of a frozen model collapses without training, and a spike-aware fine-tuning path.
+type: software
+authors:
+  - family-names: Tate
+    given-names: Levy
+    alias: iLevyTate
+version: "4.0.0"
+date-released: "2026-08-04"
+license: MIT
+repository-code: "https://github.com/iLevyTate/stac"
+url: "https://github.com/iLevyTate/stac"
+doi: "10.5281/zenodo.18023657"
+keywords:
+  - spiking neural networks
+  - neuromorphic computing
+  - ANN-to-SNN conversion
+  - transformers
+  - language models
+  - energy efficiency

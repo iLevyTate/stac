@@ -1,0 +1,27 @@
+{
+  "title": "STAC: Spiking Transformer Augmenting Cognition",
+  "description": "A research framework and study of converting pretrained transformer language models (DistilGPT-2, SmolLM2) into spiking neural networks. Includes a measured account of conversion fidelity, an operation-count energy analysis showing the current design projects worse than the dense ANN at its spike coverage, evidence that post-hoc conversion of a frozen model collapses to near-constant output without training, and a spike-aware fine-tuning path that recovers quality. Software-level simulation only; no physical neuromorphic-hardware measurements.",
+  "upload_type": "software",
+  "version": "4.0.0",
+  "license": "MIT",
+  "creators": [
+    {
+      "name": "Tate, Levy"
+    }
+  ],
+  "keywords": [
+    "spiking neural networks",
+    "neuromorphic computing",
+    "ANN-to-SNN conversion",
+    "transformers",
+    "language models",
+    "energy efficiency"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/iLevyTate/stac",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
