@@ -2,6 +2,16 @@
 
 This document explains the critical fixes made to the STAC (Spiking Transformer for Conversational AI) v2 SNN converter to resolve coherence test failures. Each fix is explained at three levels of complexity.
 
+> **Correction (2026-07) — scope of these fixes.** The fixes below concern the *non-spiking*
+> conversion path (`SpikeSoftmax`, weight transpose, cache handling), where the LIF neurons in
+> `SpikeAttention` are bypassed and the network reproduces the ANN to float precision. They do
+> **not** show that a genuinely *spiking* converted model works. A later study established that
+> turning spiking on collapses a frozen converted model to near-constant output — and that no
+> post-hoc remedy recovers it; only training does. Read [`coverage-quality.md`](coverage-quality.md)
+> and [`findings-summary.md`](findings-summary.md) for the current, measured position. The
+> passages below that attribute coherence-test failures to the base model rather than to
+> conversion are corrected inline.
+
 ---
 
 ## Table of Contents
@@ -278,14 +288,19 @@ After all fixes were applied:
 |------|--------|---------|
 | `test_fidelity_parity` | **PASS** | 100% top-1 token match, 0.0 max logit difference |
 | `test_multi_turn_parity` | **PASS** | 100% next-token match over 16 generation steps |
-| `test_multi_turn_coherence` | 30% | Limited by distilgpt2's lack of instruction tuning |
+| `test_multi_turn_coherence` | 30% | Measured on the non-spiking path; see correction below |
 
-**Note on Coherence Tests:**
+**Note on Coherence Tests (corrected 2026-07):**
 
-The 30% pass rate on coherence tests is not due to SNN conversion issues, but rather because:
-1. distilgpt2 is a base language model, not instruction-tuned
-2. It doesn't understand "User: ... Assistant:" chat format
-3. Tests using natural text completion (like "The capital of France is") pass perfectly
+The original version of this note attributed the 30% coherence pass rate to distilgpt2 being a
+base (non-instruction-tuned) model rather than to conversion. That framing is withdrawn. The 30%
+figure above is for the **non-spiking** path (which is faithful to the ANN); a base model's
+limits explain why *neither* the ANN nor the faithful conversion aces a chat-format coherence
+test. The separate and more important result is that turning **spiking on** does not merely lower
+coherence — it collapses the model to near-constant output (6 distinct predictions over 256
+positions, a comma 86.7% of the time), an information loss localized to the first two blocks and
+independent of timestep count. That is a conversion effect, not a base-model effect. See
+[`coverage-quality.md`](coverage-quality.md).
 
 ---
 
@@ -300,11 +315,17 @@ The 30% pass rate on coherence tests is not due to SNN conversion issues, but ra
 
 ## Conclusion
 
-The SNN converter now produces outputs that are mathematically equivalent to the original ANN when:
+The SNN converter produces outputs that are mathematically equivalent to the original ANN
+**only in the non-spiking configuration** — i.e. when:
 1. GELU replacement is skipped (for quality testing)
 2. Cache is properly managed during generation
+3. Spiking is off (the `SpikeAttention` LIF neurons are bypassed)
 
-For neuromorphic deployment, GELU→ReLU replacement is still necessary, but users should be aware of the quality trade-off. Future work could explore:
+Equivalence holds precisely because the network is not spiking in this mode. With genuine
+spiking enabled, the converted model collapses without further training (see
+[`coverage-quality.md`](coverage-quality.md)). For neuromorphic deployment, GELU→ReLU replacement
+and real spiking are both necessary, and recovering quality then requires training, not
+conversion alone. Future work could explore:
 - Knowledge distillation to recover quality after ReLU replacement
 - Alternative activations (SiLU, Leaky ReLU) that are more spike-compatible
 - Training-time adaptation to ReLU activations

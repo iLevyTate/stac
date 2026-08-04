@@ -52,7 +52,8 @@ STAC V1 represents the **original research approach** - a complete end-to-end tr
 # Key components in stac_v1/model.py:
 - AdEx neurons with learnable parameters (τ_m=20.0, τ_w=144.0, etc.)
 - HEMM with 1024-dim projection matrix
-- L1 regularization for energy efficiency
+- L1 spike-rate regularization (active only since the 2026-07 fix; before that it was
+  identically zero because the neurons never fired)
 - Surrogate gradient training (`--dataset wikitext2` when the optional `datasets`
   package is installed; built-in sample texts otherwise)
 ```
@@ -103,7 +104,8 @@ STAC V2 evolved from V1 by:
 1. **Shifting to conversion-based approach** for practical deployment
 2. **Extending to multi-turn conversations** with Temporal Spike Processor
 3. **Focusing on hardware compatibility** for neuromorphic deployment
-4. **Maintaining V1's energy efficiency principles** in conversion framework
+4. **Carrying over the energy-sparsity *goal*** — though the current V2 design projects worse
+   than the dense ANN at its spike coverage; see [`../docs/energy-crossover.md`](../docs/energy-crossover.md)
 
 ---
 

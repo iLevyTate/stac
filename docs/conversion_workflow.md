@@ -1,5 +1,14 @@
 # Conversion Workflow
 
+> **Scope note (2026-07).** This document describes the *mechanics* of the conversion pipeline.
+> By default that pipeline produces a numerically faithful, **non-spiking** model (the LIF
+> neurons in `SpikeAttention` are bypassed). Turning spiking on collapses a frozen converted
+> model to near-constant output, and the projected energy of the current design is **worse** than
+> the dense ANN (~7.6×) at its spike coverage. The multi-turn machinery below is real, but its
+> conversational *quality* under genuine spiking does not survive without training. See
+> [`coverage-quality.md`](coverage-quality.md), [`energy-crossover.md`](energy-crossover.md), and
+> [`findings-summary.md`](findings-summary.md) for the measured position.
+
 ## Overview
 
 The STAC framework provides two main conversion approaches:
@@ -84,6 +93,10 @@ python scripts/run_conversion.py --model_name HuggingFaceTB/SmolLM2-1.7B-Instruc
 
 ## Multi-Turn Capability
 
+> The `TemporalSpikeProcessor` machinery below (cache, positions, batching) works as described in
+> the faithful non-spiking path. Under genuine spiking, a frozen converted model does not retain
+> coherent multi-turn quality without training — the mechanism is present, the quality is not.
+
 ### TemporalSpikeProcessor Features
 - **KV Cache Management**: Maintains context across turns
 - **Position ID Handling**: Manages sequence positions
@@ -105,7 +118,7 @@ for turn in conversation_turns:
 The conversion process includes built-in validation:
 - Position ID boundary testing
 - Attention mask continuity
-- Multi-turn coherence verification
+- Multi-turn cache/state checks (behavioral pinning, not a demonstration of conversational quality)
 - Spike rate analysis
 
 ### Manual Testing
