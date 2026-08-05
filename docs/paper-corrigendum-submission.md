@@ -3,37 +3,43 @@
 Companion to [`corrigendum-2026-07.md`](corrigendum-2026-07.md), which holds the technical
 account. This file holds the text to send.
 
-The work is a **book chapter** in an edited volume, so the correction is handled by the
-**volume editor and the publisher's production/editorial contact**, not a journal desk.
-Fill in `[CHAPTER TITLE]`, `[BOOK TITLE]`, `[EDITOR(S)]`, `[PUBLISHER]`, `[YEAR]`, and
-`[DOI/ISBN]` before sending.
+The work is a **book chapter** in an IGI Global edited volume, so the correction is handled
+by the **volume editor and IGI Global's editorial/production team**, not a journal desk.
 
-## How a book chapter gets corrected
+**Publication details:**
+- Chapter: "Aligned Minds, Efficient Machines: Integrating Neuromorphic Computing for
+  Personalized AI" (Ben Kennedy, Capitol Technology University)
+- Book: *Innovative Decision-Making in Engineering: The Role of Cognition, Heuristics, and
+  Human Factors*, ed. Zian Shah Kabir
+- Publisher: IGI Global Scientific Publishing, Hershey, PA · © 2026 · pp. 113–152
+- Chapter DOI: 10.4018/979-8-3373-5702-7.ch005 · e-ISBN: 979-8-3373-5702-7
 
-Chapters are harder to correct than preprints — the print run is fixed — so the realistic
-routes, in order of preference:
+## How this chapter gets corrected
 
-1. **If still in proofs / not yet printed:** send the corrections to the volume editor now
-   as proof corrections. This is the cleanest outcome and avoids a formal erratum entirely.
-2. **If published online with a DOI** (Springer, IGI Global, IntechOpen, Palgrave, etc.):
-   request a **correction/erratum notice linked to the chapter's DOI landing page**. Most
-   academic-book platforms support an erratum attached to the chapter record.
-3. **If published in print only:** ask the editor to carry an **erratum in the next
-   printing or a subsequent edition**, and — since this repository is the cited artifact —
-   land the corrected account in the repo itself (done: `corrigendum-2026-07.md`) so anyone
-   reaching the code from the chapter finds the correction.
+The chapter is published online with a DOI, so **route 2 below is the relevant one** — an
+erratum/correction notice attached to the chapter's DOI record. IGI Global handles this
+through their editorial/production team, usually with the volume editor copied.
 
-In all three cases the repository now carries the authoritative technical record, which is
-the durable correction regardless of what the print artifact can accommodate.
+1. **If still within a correction window / proofs:** send the corrections to the editor and
+   IGI Global production as proof corrections — cleanest, avoids a formal erratum.
+2. **Published online with a DOI (this case):** request a **correction/erratum notice linked
+   to the chapter's DOI landing page** (10.4018/979-8-3373-5702-7.ch005). Contact IGI Global
+   via their editorial/rights team (`www.igi-global.com/contact/`) and copy the volume editor.
+3. **Print copies:** ask that an **erratum be carried in any subsequent printing or edition**.
+   Regardless of what the print artifact can accommodate, the repository now carries the
+   authoritative technical record (`docs/corrigendum-2026-07.md`), so anyone reaching the code
+   from the chapter finds the correction.
 
 ---
 
 ## Cover note to the volume editor / publisher
 
-> Dear [EDITOR(S)] / [PUBLISHER] editorial team,
+> Dear Dr. Kabir and the IGI Global editorial team,
 >
-> I am writing to request a correction to my chapter "[CHAPTER TITLE]" in *[BOOK TITLE]*
-> ([PUBLISHER], [YEAR]; [DOI/ISBN]).
+> I am writing to request a correction to my chapter "Aligned Minds, Efficient Machines:
+> Integrating Neuromorphic Computing for Personalized AI" in *Innovative Decision-Making in
+> Engineering: The Role of Cognition, Heuristics, and Human Factors* (IGI Global, 2026,
+> pp. 113–152; DOI 10.4018/979-8-3373-5702-7.ch005).
 >
 > A code audit of the repository cited in the chapter established that the STAC V1 spiking
 > pathway was inactive in the released implementation. Two coupled defects were responsible:

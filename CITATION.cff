@@ -2,10 +2,10 @@
 # GitHub renders this as the repository's "Cite this repository" button.
 #
 # NOTE: `doi` below is the Zenodo *concept* DOI, which always resolves to the latest version.
-# After the v4.0.0 Zenodo deposit is published, you may add the version-specific DOI as an
-# `identifiers:` entry. A book-chapter `preferred-citation:` should be added once the
-# publication fields (title, book, editors, publisher, year, DOI/ISBN) are confirmed — see
-# docs/paper-corrigendum-submission.md.
+# After the v4.0.0 Zenodo deposit is published, add the version-specific DOI as an
+# `identifiers:` entry.
+# The software author is Ben Kennedy; "Levy Tate" is an alias under which the accompanying
+# book chapter cites this software ("Tate, L."), preserved here so those citations resolve.
 cff-version: 1.2.0
 message: "If you use this software, please cite it using these metadata."
 title: "STAC: Spiking Transformer Augmenting Cognition"
@@ -16,9 +16,10 @@ abstract: >-
   of a frozen model collapses without training, and a spike-aware fine-tuning path.
 type: software
 authors:
-  - family-names: Tate
-    given-names: Levy
-    alias: iLevyTate
+  - family-names: Kennedy
+    given-names: Ben
+    affiliation: Capitol Technology University
+    alias: "Levy Tate (iLevyTate)"
 version: "4.0.0"
 date-released: "2026-08-04"
 license: MIT
@@ -32,3 +33,24 @@ keywords:
   - transformers
   - language models
   - energy efficiency
+preferred-citation:
+  type: article
+  title: "Aligned Minds, Efficient Machines: Integrating Neuromorphic Computing for Personalized AI"
+  authors:
+    - family-names: Kennedy
+      given-names: Ben
+      affiliation: Capitol Technology University
+  editors:
+    - family-names: Kabir
+      given-names: Zian Shah
+  collection-title: "Innovative Decision-Making in Engineering: The Role of Cognition, Heuristics, and Human Factors"
+  publisher:
+    name: "IGI Global Scientific Publishing"
+    city: Hershey
+    region: PA
+    country: US
+  year: 2026
+  start: 113
+  end: 152
+  doi: "10.4018/979-8-3373-5702-7.ch005"
+  isbn: "979-8-3373-5702-7"
