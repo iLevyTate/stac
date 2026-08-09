@@ -217,6 +217,8 @@ experiments/
 scratch/
 playground/
 *.ipynb
+# ...except the committed, runnable Colab notebook, which is a deliverable.
+!notebooks/stac_v2_colab.ipynb
 
 # Calibration and benchmark data
 calibration_data/
