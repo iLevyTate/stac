@@ -103,9 +103,19 @@ def _fan_out(module: nn.Module) -> int:
     """
     Downstream synapses per spike for the layer a neuron feeds.
 
-    Approximated by the output width of the module's parent projection. Without a
-    traced graph we cannot know the true fan-out, so we use the neuron's own feature
-    width, which is the standard approximation in the SNN literature.
+    Ideally the output width of the projection the neuron's spikes drive. In practice the
+    hook is attached to the spiking-neuron module itself (an IF/LIF/AdEx neuron), which does
+    NOT expose ``out_features``/``embed_dim``/``hidden_size`` — those live on the downstream
+    projection, which is not reachable from the neuron without a traced graph. So this
+    lookup almost always falls through to ``1``, and ``synops`` collapses to a raw spike
+    count (a lower bound on true synaptic operations).
+
+    Consequence: the reported ``synops`` and the SNN's accumulate-energy term are undercounts.
+    That biases the ANN-vs-SNN comparison *towards* the SNN, so the true energy gap is at
+    least as unfavourable as reported — never better. Resolving the real fan-out (passing the
+    downstream projection width in at hook-registration time) would raise ``synops``; on the
+    current designs the dense remainder dominates ``energy_snn_pj`` and the headline ratio
+    barely moves, but do not treat this figure as exact.
     """
     for attr in ("out_features", "embed_dim", "hidden_size"):
         value = getattr(module, attr, None)

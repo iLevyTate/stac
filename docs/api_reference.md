@@ -94,7 +94,7 @@ Replace GELU activations with ReLU for SNN compatibility.
 **Returns:**
 - Modified model with ReLU activations
 
-### `simplified_conversion(model, timesteps=32, skip_gelu_replacement=False)`
+### `simplified_conversion(model, timesteps=32, skip_gelu_replacement=False, real_spiking=False)`
 
 Perform simplified ANN→SNN conversion. Returns a `TemporalSpikeProcessor` wrapping the
 converted model.
@@ -105,6 +105,10 @@ converted model.
 - `skip_gelu_replacement` (bool): If `True`, skip the GELU→ReLU substitution. This keeps the
   path closer to the ANN (and, combined with spiking off, faithful to it); set `False` for
   neuromorphic deployment, where quality then depends on training, not conversion alone.
+- `real_spiking` (bool): If `True`, `SpikeAttention` routes Q/K/V through its LIF neurons and
+  drops softmax (genuine spiking self-attention), so the T-timestep loop stops being a no-op.
+  Default `False` reproduces the source model exactly; enabling it changes the model's outputs
+  and should be measured (see `spike_metrics.py`) before it is relied on.
 
 **Returns:**
 - `TemporalSpikeProcessor` wrapping the converted SNN model
@@ -119,12 +123,15 @@ Replace LayerNorm with SpikeLayerNorm.
 **Returns:**
 - Modified model with spike-compatible normalization
 
-### `replace_attention_with_spikeattention(model)`
+### `replace_attention_with_spikeattention(model, spiking=False)`
 
 Replace standard attention with SpikeAttention.
 
 **Parameters:**
 - `model` (torch.nn.Module): Model to modify
+- `spiking` (bool): If `True`, the installed `SpikeAttention` routes Q/K/V through its LIF
+  neurons; default `False` constructs the modules but bypasses the neurons (structural
+  spiking only), matching the default `simplified_conversion` behaviour.
 
 **Returns:**
 - Modified model with spike-compatible attention
