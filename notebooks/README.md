@@ -16,7 +16,11 @@ What it walks through:
    the timestep-dependent drift that a frozen model cannot recover from.
 5. The coverage-vs-sparsity energy analysis and its scaling behaviour.
 6. (Optional) SmolLM2-135M, showing the RoPE/RMSNorm fix.
-7. (Optional, GPU) Spike-aware fine-tuning — the recovery path.
+7. **End-to-end retraining** (GPU recommended): convert → extend coverage → calibrate →
+   backprop-through-time training with distillation → before/after perplexity → save the
+   model, then reload it and generate text. This is the full "does training fix it?" loop
+   the audit couldn't finish for lack of GPU hardware. Note it installs the `datasets`
+   package (WikiText-2), which the base requirements leave optional.
 
 > **Expectation setting:** with spiking off, conversion is faithful; with spiking on and the
 > weights frozen, the model collapses and the projected energy is worse than the dense ANN.
