@@ -4,24 +4,12 @@ A clean, copy-paste draft of the correction request for the book chapter, plus a
 verification section so the editor (or you) can independently confirm every claim. The
 technical account lives in [`corrigendum-2026-07.md`](corrigendum-2026-07.md); the annotated
 change list in [`paper-corrigendum-submission.md`](paper-corrigendum-submission.md). This
-file is the thing you actually send.
+file was the thing to send for the STAC V1 correction alone.
 
----
-
-## ⚠ Before you send — one open item (the DOI)
-
-Correction ⑥ replaces a wrong software-version citation. It needs the **version-specific
-Zenodo DOI for STAC v4.0.0** — and that deposit does **not exist yet**:
-
-- STAC's concept DOI `10.5281/zenodo.18023657` currently resolves to **3.0.0-beta**, not 4.0.0.
-- The DOI `10.5281/zenodo.21856231` is **not STAC** — it points to `iLevyTate/scanue-v22`
-  (SCANUE-V22 1.3.0), a different project. **Do not use it here.**
-
-**Action:** publish the v4.0.0 release to Zenodo to mint its version-specific DOI, then drop
-that DOI into Correction ⑥ below (search for `PUBLISH-V4-DOI`). Until then the draft cites
-the concept DOI `10.5281/zenodo.18023657`, which is legitimate — it resolves to the latest
-STAC version — but pointing at the exact 4.0.0 record is cleaner and closes the loop the
-correction is about.
+> **Superseded.** The chapter also needs its Appendix B scoring model corrected (tracked in the
+> SCAN-Resources repository). Both corrections target the same chapter DOI, so they are
+> submitted together as one letter: [`corrigendum-combined.md`](corrigendum-combined.md).
+> Send that file. This one is kept as the STAC-only source it was merged from.
 
 ---
 
@@ -156,11 +144,13 @@ two days after the tag.
 `stac_v1/` package) and the corrected behaviour described in this corrigendum:
 
 > Tate, L. (2026). STAC: Spiking Transformer Augmenting Cognition (Version 4.0.0) [Computer
-> software]. Zenodo. https://doi.org/PUBLISH-V4-DOI
+> software]. Zenodo. https://doi.org/10.5281/zenodo.[4.0.0-VERSION-DOI]
 
-> **`PUBLISH-V4-DOI`** — replace with the version-specific DOI minted when the v4.0.0 Zenodo
-> deposit is published. Until then, the concept DOI `10.5281/zenodo.18023657` resolves to the
-> latest version and may be used. (Note: `10.5281/zenodo.21856231` is a different project,
+> **`[4.0.0-VERSION-DOI]`** — replace with the version-specific DOI minted when the v4.0.0
+> Zenodo deposit is published. STAC's DOIs, for reference: the *concept* DOI is
+> `10.5281/zenodo.14545340` (always resolves to the latest version); `10.5281/zenodo.18023657`
+> is the *version* DOI of 3.0.0-beta, the last release with the inactive V1 pathway, and must
+> not be cited as the corrected version. (`10.5281/zenodo.21856231` is a different project,
 > SCANUE-V22 — not this one.)
 
 Optionally add a retention note: *"Earlier releases up to 3.0.0-beta contained the inactive

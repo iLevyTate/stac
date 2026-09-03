@@ -64,6 +64,10 @@ conversion is now trustworthy, and the record now matches what the code does.**
   they overstated the measured position.
 - Added `CITATION.cff` and `.zenodo.json` (structured citation and deposition metadata; neither
   existed before).
+- `CITATION.cff` and the README badge now carry the Zenodo *concept* DOI (`10.5281/zenodo.14545340`),
+  which resolves to the latest version. They previously labelled `10.5281/zenodo.18023657` as the
+  concept DOI; it is the 3.0.0-beta *version* DOI and is now listed as such under `identifiers:`.
+- The Release workflow also runs on a pushed version tag, not only from the Actions tab.
 
 ### Correction to the published record
 
@@ -71,6 +75,9 @@ conversion is now trustworthy, and the record now matches what the code does.**
   to the accompanying book chapter: the V1 spiking-mechanism claims describe intended rather than
   observed behaviour, and the software citation pointed at a version (`2.0.0.3`) that contained no
   V1 implementation — now resolved by this `4.0.0` release.
+- `docs/corrigendum-combined.md` merges that correction with the Appendix B scoring correction
+  maintained in `iLevyTate/SCAN-Resources` into the single letter to send, since both target the
+  same chapter DOI.
 
 ### Not included
 

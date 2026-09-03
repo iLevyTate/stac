@@ -1,9 +1,10 @@
 # Structured citation metadata (Citation File Format 1.2.0).
 # GitHub renders this as the repository's "Cite this repository" button.
 #
-# NOTE: `doi` below is the Zenodo *concept* DOI, which always resolves to the latest version.
-# After the v4.0.0 Zenodo deposit is published, add the version-specific DOI as an
-# `identifiers:` entry.
+# NOTE: `doi` below is the Zenodo *concept* DOI (10.5281/zenodo.14545340), which always
+# resolves to the latest version. Version-specific DOIs are listed under `identifiers:`.
+# 10.5281/zenodo.18023657 is the 3.0.0-beta *version* record, not the concept DOI.
+# After the v4.0.0 Zenodo deposit is published, add its version DOI as an `identifiers:` entry.
 # The software author is Ben Kennedy; "Levy Tate" is an alias under which the accompanying
 # book chapter cites this software ("Tate, L."), preserved here so those citations resolve.
 cff-version: 1.2.0
@@ -25,7 +26,14 @@ date-released: "2026-08-04"
 license: MIT
 repository-code: "https://github.com/iLevyTate/stac"
 url: "https://github.com/iLevyTate/stac"
-doi: "10.5281/zenodo.18023657"
+doi: "10.5281/zenodo.14545340"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.14545340"
+    description: "Concept DOI; resolves to the latest version"
+  - type: doi
+    value: "10.5281/zenodo.18023657"
+    description: "Version DOI for 3.0.0-beta (carries the inactive V1 spiking pathway described in docs/corrigendum-2026-07.md)"
 keywords:
   - spiking neural networks
   - neuromorphic computing
