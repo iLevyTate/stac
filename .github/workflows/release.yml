@@ -2,11 +2,16 @@ name: Release
 
 # Cuts a GitHub release from a tag, which is what Zenodo's integration listens for.
 # Run it from the Actions tab (or `gh workflow run release.yml -f tag=4.0.0`) once the
-# version bump is on main.
+# version bump is on main, or push the tag itself (`git tag 4.0.0 && git push origin 4.0.0`)
+# and the release is cut from that tag. A tag with a hyphen (`3.0.0-beta`) is a pre-release.
 #
 # STAC keeps its version in CITATION.cff and .zenodo.json rather than a package manifest,
 # so both are checked against the tag before anything is published.
 on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
   workflow_dispatch:
     inputs:
       tag:
@@ -32,19 +37,38 @@ jobs:
           # Full history so the tag lands on a real commit, not a shallow stub.
           fetch-depth: 0
 
-      - name: Check the tag does not already exist
+      - name: Resolve the tag
+        id: tag
+        # On workflow_dispatch the tag comes from the input and must not exist yet. On a tag
+        # push it is the pushed ref, which by definition already exists, and the release is
+        # created on that tag rather than on a target commit.
         run: |
-          if git rev-parse -q --verify "refs/tags/${{ inputs.tag }}" >/dev/null; then
-            echo "::error::Tag ${{ inputs.tag }} already exists."
-            exit 1
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="$GITHUB_REF_NAME"
+            target=""
+            case "$tag" in *-*) prerelease="--prerelease" ;; *) prerelease="" ;; esac
+          else
+            tag="${{ inputs.tag }}"
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::error::Tag $tag already exists."
+              exit 1
+            fi
+            target="--target ${{ github.sha }}"
+            prerelease="${{ inputs.prerelease && '--prerelease' || '' }}"
           fi
+          {
+            echo "tag=$tag"
+            echo "target=$target"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag (${{ github.event_name }})${prerelease:+ as a pre-release}."
 
       - name: Verify the tag matches the version in the tree
         # A release whose tag disagrees with the citation metadata is worse than no release:
         # the Zenodo deposit and the "cite this" metadata would say different things, which is
         # exactly the class of defect the 4.0.0 corrigendum exists to correct.
         run: |
-          expected="${{ inputs.tag }}"
+          expected="${{ steps.tag.outputs.tag }}"
           expected="${expected#v}"
           # Match the top-level `version:` key only (column 0), so the nested fields under
           # preferred-citation cannot be picked up instead.
@@ -64,7 +88,7 @@ jobs:
       - name: Extract the changelog section for this version
         id: notes
         run: |
-          version="${{ inputs.tag }}"
+          version="${{ steps.tag.outputs.tag }}"
           version="${version#v}"
           # The section runs from its own heading to the next version heading. The headings use
           # an em dash ("## [4.0.0] — 2026-08-04"), so match on the bracketed version alone.
@@ -83,9 +107,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ inputs.tag }}" \
-            --title "${{ inputs.tag }}" \
+          tag="${{ steps.tag.outputs.tag }}"
+          # $target and $prerelease are intentionally unquoted: each is either empty or a flag.
+          # shellcheck disable=SC2086
+          gh release create "$tag" \
+            --title "$tag" \
             --notes-file release-notes.md \
-            --target "${{ github.sha }}" \
-            ${{ inputs.prerelease && '--prerelease' || '' }}
-          echo "### Released [${{ inputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }})" >> "$GITHUB_STEP_SUMMARY"
+            ${{ steps.tag.outputs.target }} \
+            ${{ steps.tag.outputs.prerelease }}
+          echo "### Released [$tag](${{ github.server_url }}/${{ github.repository }}/releases/tag/$tag)" >> "$GITHUB_STEP_SUMMARY"
