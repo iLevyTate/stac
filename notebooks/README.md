@@ -5,7 +5,7 @@
 A runnable, zero-setup tour of the V2 conversion pipeline. Clone-free: open it in Colab and
 run top to bottom.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/iLevyTate/stac/blob/claude/codebase-updates-v2-status-p19lcw/notebooks/stac_v2_colab.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/iLevyTate/stac/blob/main/notebooks/stac_v2_colab.ipynb)
 
 What it walks through:
 

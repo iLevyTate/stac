@@ -1,0 +1,91 @@
+name: Release
+
+# Cuts a GitHub release from a tag, which is what Zenodo's integration listens for.
+# Run it from the Actions tab (or `gh workflow run release.yml -f tag=4.0.0`) once the
+# version bump is on main.
+#
+# STAC keeps its version in CITATION.cff and .zenodo.json rather than a package manifest,
+# so both are checked against the tag before anything is published.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create and release, e.g. 4.0.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as a pre-release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the tag lands on a real commit, not a shallow stub.
+          fetch-depth: 0
+
+      - name: Check the tag does not already exist
+        run: |
+          if git rev-parse -q --verify "refs/tags/${{ inputs.tag }}" >/dev/null; then
+            echo "::error::Tag ${{ inputs.tag }} already exists."
+            exit 1
+          fi
+
+      - name: Verify the tag matches the version in the tree
+        # A release whose tag disagrees with the citation metadata is worse than no release:
+        # the Zenodo deposit and the "cite this" metadata would say different things, which is
+        # exactly the class of defect the 4.0.0 corrigendum exists to correct.
+        run: |
+          expected="${{ inputs.tag }}"
+          expected="${expected#v}"
+          # Match the top-level `version:` key only (column 0), so the nested fields under
+          # preferred-citation cannot be picked up instead.
+          cff=$(python3 -c 'import re,pathlib; m=re.search(r"^version:\s*\"?([^\"\s]+)\"?\s*$", pathlib.Path("CITATION.cff").read_text(), re.M); print(m.group(1) if m else "")')
+          zen=$(python3 -c "import json;print(json.load(open('.zenodo.json'))['version'])")
+          fail=0
+          for pair in "CITATION.cff:$cff" ".zenodo.json:$zen"; do
+            file="${pair%%:*}"; got="${pair#*:}"
+            if [ "$got" != "$expected" ]; then
+              echo "::error::$file declares version '$got', but the tag is '$expected'."
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] || exit 1
+          echo "Version $expected matches CITATION.cff and .zenodo.json."
+
+      - name: Extract the changelog section for this version
+        id: notes
+        run: |
+          version="${{ inputs.tag }}"
+          version="${version#v}"
+          # The section runs from its own heading to the next version heading. The headings use
+          # an em dash ("## [4.0.0] — 2026-08-04"), so match on the bracketed version alone.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No CHANGELOG.md section found for $version."
+            exit 1
+          fi
+          echo "Extracted $(wc -l < release-notes.md) lines of release notes."
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --title "${{ inputs.tag }}" \
+            --notes-file release-notes.md \
+            --target "${{ github.sha }}" \
+            ${{ inputs.prerelease && '--prerelease' || '' }}
+          echo "### Released [${{ inputs.tag }}](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ inputs.tag }})" >> "$GITHUB_STEP_SUMMARY"

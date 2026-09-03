@@ -82,6 +82,12 @@ def perplexity(model, ids, window, stride, timesteps, device):
     from spikingjelly.activation_based import functional
 
     inner = model.snn_model if isinstance(model, TemporalSpikeProcessor) else model
+    # Perplexity must not be measured with dropout active. Training call sites leave the
+    # model in train() mode, so without this every reported number is dropout-inflated and
+    # non-reproducible (a rerun gives different values, masking real improvements).
+    was_training = inner.training
+    inner.eval()
+    stride = max(1, stride)  # seq_len==1 -> stride 0 -> range() ValueError
     nlls, counted, prev = [], 0, 0
     for begin in range(0, ids.size(0), stride):
         end = min(begin + window, ids.size(0))
@@ -107,7 +113,10 @@ def perplexity(model, ids, window, stride, timesteps, device):
         prev = end
         if end == ids.size(0):
             break
-    return float(torch.exp(torch.tensor(sum(nlls) / max(counted, 1))))
+    ppl = float(torch.exp(torch.tensor(sum(nlls) / max(counted, 1))))
+    if was_training:
+        inner.train()
+    return ppl
 
 
 def main() -> int:
@@ -184,9 +193,13 @@ def main() -> int:
         if teacher is not None:
             with torch.no_grad():
                 t_logits = teacher(chunk).logits[:, :-1, :]
+            # Reshape to (tokens, vocab) so batchmean divides by the token count, not by
+            # batch=1. Otherwise KD is ~(seq_len-1)x out of scale versus the per-token CE and
+            # the documented L = (1-alpha)*CE + alpha*T^2*KL trade-off does not hold.
+            V = logits.size(-1)
             kd = F.kl_div(
-                F.log_softmax(logits[:, :-1, :] / args.kd_temp, dim=-1),
-                F.softmax(t_logits / args.kd_temp, dim=-1),
+                F.log_softmax(logits[:, :-1, :].reshape(-1, V) / args.kd_temp, dim=-1),
+                F.softmax(t_logits.reshape(-1, V) / args.kd_temp, dim=-1),
                 reduction="batchmean",
             ) * (args.kd_temp ** 2)
             loss = (1 - args.alpha) * ce + args.alpha * kd
