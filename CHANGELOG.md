@@ -78,6 +78,8 @@ conversion is now trustworthy, and the record now matches what the code does.**
 - `docs/corrigendum-combined.md` merges that correction with the Appendix B scoring correction
   maintained in `iLevyTate/SCAN-Resources` into the single letter to send, since both target the
   same chapter DOI.
+- Zenodo deposit of this release: version DOI `10.5281/zenodo.22554655` (published 2026-09-06),
+  the DOI the corrected Tate (2025a) reference cites.
 
 ### Not included
 

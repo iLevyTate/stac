@@ -2,9 +2,9 @@
 # GitHub renders this as the repository's "Cite this repository" button.
 #
 # NOTE: `doi` below is the Zenodo *concept* DOI (10.5281/zenodo.14545340), which always
-# resolves to the latest version. Version-specific DOIs are listed under `identifiers:`.
-# 10.5281/zenodo.18023657 is the 3.0.0-beta *version* record, not the concept DOI.
-# After the v4.0.0 Zenodo deposit is published, add its version DOI as an `identifiers:` entry.
+# resolves to the latest version. Version-specific DOIs are listed under `identifiers:`;
+# 10.5281/zenodo.22554655 is the 4.0.0 record and 10.5281/zenodo.18023657 is 3.0.0-beta.
+# Cite the version DOI of the release you used.
 # The software author is Ben Kennedy; "Levy Tate" is an alias under which the accompanying
 # book chapter cites this software ("Tate, L."), preserved here so those citations resolve.
 cff-version: 1.2.0
@@ -31,6 +31,9 @@ identifiers:
   - type: doi
     value: "10.5281/zenodo.14545340"
     description: "Concept DOI; resolves to the latest version"
+  - type: doi
+    value: "10.5281/zenodo.22554655"
+    description: "Version DOI for 4.0.0 (the release that contains the V1 implementation and the corrected spiking pathway)"
   - type: doi
     value: "10.5281/zenodo.18023657"
     description: "Version DOI for 3.0.0-beta (carries the inactive V1 spiking pathway described in docs/corrigendum-2026-07.md)"
