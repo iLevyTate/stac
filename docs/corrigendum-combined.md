@@ -17,7 +17,7 @@ chapter:
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Replace `[4.0.0-VERSION-DOI]` with the version DOI Zenodo mints for the STAC 4.0.0 release. Check it on Zenodo under concept DOI 10.5281/zenodo.14545340, and that `https://doi.org/10.5281/zenodo.[4.0.0-VERSION-DOI]` resolves to a record titled `iLevyTate/stac: 4.0.0`. | pending release |
+| 1 | STAC 4.0.0 version DOI: 10.5281/zenodo.22554655, minted 2026-09-06 under concept DOI 10.5281/zenodo.14545340 (record title "STAC: Spiking Transformer Augmenting Cognition", version 4.0.0, creator Kennedy, Ben). `https://doi.org/10.5281/zenodo.22554655` resolves; the concept DOI now resolves to it. Filled in below. | done |
 | 2 | Replace `[SCAN-RESOURCES-2.0.0-DOI]` with the version DOI for SCAN-Resources 2.0.0. Until that release is deposited, the SCAN-Resources concept DOI (10.5281/zenodo.14053202) resolves to 1.1.0, which still carries the **uncorrected** scoring, so the letter cannot go before it exists. | pending release |
 | 3 | Diff every **Published** passage in Parts I and II against the chapter PDF. The quotations were transcribed from the manuscript and have not been checked against the typeset text. | pending |
 | 4 | Attach `Appendix-B-Scoring-v2.0` rendered to PDF (the source file carries no author metadata; keep it that way). | pending |
@@ -241,7 +241,7 @@ and the corrected behaviour described in Part I. Its year changes, so in-text ci
 Tate (2025a) become Tate (2026):
 
 > Tate, L. (2026). STAC: Spiking Transformer Augmenting Cognition (Version 4.0.0) [Computer
-> software]. Zenodo. https://doi.org/10.5281/zenodo.[4.0.0-VERSION-DOI]
+> software]. Zenodo. https://doi.org/10.5281/zenodo.22554655
 
 Optionally add a retention note: *"Earlier releases up to 3.0.0-beta contained the inactive
 V1 spiking pathway described above."*

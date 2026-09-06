@@ -144,14 +144,14 @@ two days after the tag.
 `stac_v1/` package) and the corrected behaviour described in this corrigendum:
 
 > Tate, L. (2026). STAC: Spiking Transformer Augmenting Cognition (Version 4.0.0) [Computer
-> software]. Zenodo. https://doi.org/10.5281/zenodo.[4.0.0-VERSION-DOI]
+> software]. Zenodo. https://doi.org/10.5281/zenodo.22554655
 
-> **`[4.0.0-VERSION-DOI]`** — replace with the version-specific DOI minted when the v4.0.0
-> Zenodo deposit is published. STAC's DOIs, for reference: the *concept* DOI is
-> `10.5281/zenodo.14545340` (always resolves to the latest version); `10.5281/zenodo.18023657`
-> is the *version* DOI of 3.0.0-beta, the last release with the inactive V1 pathway, and must
-> not be cited as the corrected version. (`10.5281/zenodo.21856231` is a different project,
-> SCANUE-V22 — not this one.)
+> `10.5281/zenodo.22554655` is the version DOI of the 4.0.0 Zenodo deposit (published
+> 2026-09-06). STAC's other DOIs, for reference: the *concept* DOI is `10.5281/zenodo.14545340`
+> (always resolves to the latest version); `10.5281/zenodo.18023657` is the *version* DOI of
+> 3.0.0-beta, the last release with the inactive V1 pathway, and must not be cited as the
+> corrected version. (`10.5281/zenodo.21856231` is a different project, SCANUE-V22 — not this
+> one.)
 
 Optionally add a retention note: *"Earlier releases up to 3.0.0-beta contained the inactive
 V1 spiking pathway described above."*

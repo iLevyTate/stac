@@ -144,11 +144,11 @@ V1 fine-tuning" — the comparison has no referent, since that term was identica
 `stac_v1/` package) and the corrected behaviour described in this corrigendum:
 
 > Tate, L. (2026). STAC: Spiking Transformer Augmenting Cognition (Version 4.0.0) [Computer
-> software]. Zenodo. https://doi.org/10.5281/zenodo.[4.0.0-VERSION-DOI]
+> software]. Zenodo. https://doi.org/10.5281/zenodo.22554655
 
-`[4.0.0-VERSION-DOI]` is the version-specific DOI minted when the v4.0.0 Zenodo deposit is
-published (the Release workflow cuts the GitHub release that Zenodo archives). For reference,
-STAC's concept DOI is `10.5281/zenodo.14545340`, which always resolves to the latest version;
+`10.5281/zenodo.22554655` is the version DOI of the 4.0.0 Zenodo deposit, published 2026-09-06
+from the GitHub release the Release workflow cut. For reference, STAC's concept DOI is
+`10.5281/zenodo.14545340`, which always resolves to the latest version;
 `10.5281/zenodo.18023657` is the version DOI of 3.0.0-beta, the last release carrying the
 inactive V1 pathway, and is not a substitute for the 4.0.0 DOI here. Optionally add a
 retention note: *"Earlier releases up to 3.0.0-beta contained the inactive V1 spiking pathway
