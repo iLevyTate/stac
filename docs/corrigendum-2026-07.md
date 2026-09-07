@@ -105,6 +105,19 @@ corrections are confined to statements of mechanism:
 | Spike regularization | Total loss `L = L_CE + λ‖S‖₁` | Second term evaluated to exactly zero |
 | Initial Results | "the integrated L1 spike regularization used during STAC V1 fine-tuning" | No referent |
 
+### Verification log
+
+| Date | Check | Result |
+| --- | --- | --- |
+| 2026-09-07 | `scripts/verify_v1_corrigendum.py` on `main` (fabab59), torch CPU build | 0 of 262,144 spikes; gap 14.70 mV; max current 2.3988 vs 75.0 required; L1 = 0.00000000; surrogate gradient 0.000e+00. Exit 0. |
+| 2026-09-07 | Published passages ①–⑤ diffed against the submitted manuscript with appendices (Edit12, 2025-10-12) | All five match verbatim. Typeset chapter PDF not yet checked. |
+
+### Submission
+
+Not yet sent. The combined letter is [`corrigendum-combined.md`](corrigendum-combined.md);
+the remaining steps are in [`corrigendum-runbook.md`](corrigendum-runbook.md). Record the send
+date, recipients, and any ticket number here once it goes.
+
 ### Citation accuracy
 
 The paper cites the V1 implementation as *iLevyTate/stac* **Version 2.0.0.3**. That tag

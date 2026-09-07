@@ -15,14 +15,18 @@ chapter:
 
 ## Before sending (not part of the letter)
 
+Status as of 2026-09-07. The step-by-step for the open rows is in
+[`corrigendum-runbook.md`](corrigendum-runbook.md).
+
 | # | Item | Status |
 |---|---|---|
 | 1 | STAC 4.0.0 version DOI: 10.5281/zenodo.22554655, minted 2026-09-06 under concept DOI 10.5281/zenodo.14545340 (record title "STAC: Spiking Transformer Augmenting Cognition", version 4.0.0, creator Kennedy, Ben). `https://doi.org/10.5281/zenodo.22554655` resolves; the concept DOI now resolves to it. Filled in below. | done |
-| 2 | Replace `[SCAN-RESOURCES-2.0.0-DOI]` with the version DOI for SCAN-Resources 2.0.0. Until that release is deposited, the SCAN-Resources concept DOI (10.5281/zenodo.14053202) resolves to 1.1.0, which still carries the **uncorrected** scoring, so the letter cannot go before it exists. | pending release |
-| 3 | Diff every **Published** passage in Parts I and II against the chapter PDF. The quotations were transcribed from the manuscript and have not been checked against the typeset text. | pending |
-| 4 | Attach `Appendix-B-Scoring-v2.0` rendered to PDF (the source file carries no author metadata; keep it that way). | pending |
-| 5 | Confirm the recipient addresses with IGI Global's current editorial contact, and copy the volume editor. | pending |
-| 6 | Send from the address IGI Global has on file for the chapter author. | pending |
+| 2 | Replace `[SCAN-RESOURCES-2.0.0-DOI]` with the version DOI for SCAN-Resources 2.0.0. Until that release is deposited, the SCAN-Resources concept DOI (10.5281/zenodo.14053202) resolves to 1.1.0 (record 16711302), which still carries the **uncorrected** scoring, so the letter cannot go before it exists. The SCAN-Resources tree is release-ready: CITATION.cff declares 2.0.0, the changelog section extracts, and all four release gates pass locally (2026-09-07). Cutting the release is a one-click Actions run; see the runbook. | **blocked on release** |
+| 3 | Diff every **Published** passage in Parts I and II against the chapter text. Done 2026-09-07 against the submitted manuscript with appendices (Drive: `…Submission_With_Appendices_Edit12.pdf`, 2025-10-12): all five Part I passages match verbatim; the Appendix B labels, ranges, and Global Note match; the reference-list defects (truncated `140532`, shared `15867066`, Ostrau et al. cited six times with no entry) are all present in the manuscript. Two labels in this file were abbreviated and are now quoted exactly. Remaining: a final read against the **typeset** chapter PDF, which is not in Drive. | done against manuscript; typeset check pending |
+| 4 | Attach `Appendix-B-Scoring-v2.0` rendered to PDF. Rendered 2026-09-07 from `Forms/Appendix-B-Scoring-v2.0.md` (SCAN-Resources `main`, 67532d5) with headless Chromium; the identifying-metadata guard from that repository's CI reports 0 hits on it. Delivered as a file (200 KB); attach it when sending. | rendered; attach at send |
+| 5 | Confirm the recipient addresses with IGI Global's current editorial contact, and copy the volume editor. The Gmail draft is addressed to `bookproofing@igi-global.com`, cc `cust@igi-global.com` and `ZianShah.Kabir@uts.edu.au`. Neither IGI address appears in any prior correspondence in the mailbox; the only IGI contact on record is Cassandra Martin (acquisitions, `cmartin@igi-global.com`, 2026-01-12), who is not the right desk for a correction but can redirect. | pending confirmation |
+| 6 | Send from the address IGI Global has on file for the chapter author (`bkennedy1@captechu.edu`; IGI's January 2026 mail went there). The draft sits in the gmail.com account, so it has to be forwarded or re-sent from the university address. | pending |
+| 7 | Run `notebooks/stac_v2_colab.ipynb` top to bottom on `main` once, since Part IV offers it to the editor as a verification path. | pending |
 
 Send only when every row reads done. Record the send date in
 [`corrigendum-2026-07.md`](corrigendum-2026-07.md) afterwards.
@@ -150,7 +154,7 @@ Send only when every row reads done. Record the send date in
 
 ### ④ STAC V1 methodology — spike regularization
 
-**Add after** the sentence defining `L = L_CE + λ‖S‖₁`:
+**Add after** the sentence "The total loss is defined as L = L_CE + λ‖S‖₁.":
 
 > *Audit note.* Because the AdEx neurons emitted no spikes in the released implementation, the
 > L1 term λ‖S‖₁ evaluated to exactly zero throughout training and exerted no regularization
@@ -179,16 +183,17 @@ attached `Appendix-B-Scoring-v2.0` replaces the appendix in full; the changes ar
    reverse of the items' direction.
 
 2. **Section C (Impulsivity) — inverted interpretation.** The same error: the minimum score
-   range (6–12) is labelled "High Motor Impulsivity… Acts impulsively," although 6 is the
-   least impulsive score attainable.
+   range (6–12) carries the profile "High Motor Impulsivity, Low Non-Planning Impulsivity" and
+   the description "Acts impulsively; limited advance planning," although 6 is the least
+   impulsive score attainable.
 
 3. **Section B (Emotion Regulation) — two constructs summed into one.** Cognitive reappraisal
    (Q9–Q10) and expressive suppression (Q11–Q12) are distinct strategies, but the published
    table sums them into a single total and reads a two-dimensional label from it. As a result
    two of the four profiles are unreachable, and opposite response patterns receive the same
    label — for example, maximum reappraisal with minimum suppression (14 + 2 = 16) and its
-   exact opposite (2 + 14 = 16) both total 16 and both map to "Low Reappraisal, High
-   Suppression." The corrected version scores the two strategies separately.
+   exact opposite (2 + 14 = 16) both total 16 and both map to "Low Cognitive Reappraisal, High
+   Expressive Suppression." The corrected version scores the two strategies separately.
 
 4. **Section E (Decision-Making Style) — undefined for tied responses.** The rule selects
    "the single highest-scoring item" among Q22–Q26 but specifies nothing for ties. Of the
@@ -198,8 +203,8 @@ attached `Appendix-B-Scoring-v2.0` replaces the appendix in full; the changes ar
 5. **Sections G (Perceived Stress) and H (Empathy) — reverse-keyed items summed raw.** Q32 (a
    positively worded item in the stress section) and Q35 (a reverse-worded item in the
    empathy section) run opposite to their sections' direction and must be transformed
-   (`6 − raw`) before summing. The published Global Note ("scores are summed within each
-   section") shows they were summed raw, shifting those section totals by up to 4 points. The
+   (`6 − raw`) before summing. The published Global Note ("Scores are summed within each
+   section…") shows they were summed raw, shifting those section totals by up to 4 points. The
    band labels were unaffected.
 
 The corrected Appendix B also separates the Fantasy item (Q36) from the empathy total — it
@@ -229,7 +234,7 @@ publication-ready extract of it.
 **Published**
 
 > Tate, L. (2025a). STAC V1 implementation in iLevyTate/stac (Version 2.0.0.3) [Computer
-> software].
+> software, Jupyter Notebook]. Zenodo. https://doi.org/10.5281/zenodo.15867066
 
 **Issue.** Tag `2.0.0.3` (commit `26e213d`, 2025-07-11) contains no V1 implementation, only
 `stac-v1/README.md`. The notebook `stac-v1/stacv1.ipynb` was committed 2025-07-13 (`7b09d54`),
