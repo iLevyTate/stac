@@ -21,7 +21,7 @@ Status as of 2026-09-07. The step-by-step for the open rows is in
 | # | Item | Status |
 |---|---|---|
 | 1 | STAC 4.0.0 version DOI: 10.5281/zenodo.22554655, minted 2026-09-06 under concept DOI 10.5281/zenodo.14545340 (record title "STAC: Spiking Transformer Augmenting Cognition", version 4.0.0, creator Kennedy, Ben). `https://doi.org/10.5281/zenodo.22554655` resolves; the concept DOI now resolves to it. Filled in below. | done |
-| 2 | Replace `[SCAN-RESOURCES-2.0.0-DOI]` with the version DOI for SCAN-Resources 2.0.0. Until that release is deposited, the SCAN-Resources concept DOI (10.5281/zenodo.14053202) resolves to 1.1.0 (record 16711302), which still carries the **uncorrected** scoring, so the letter cannot go before it exists. The SCAN-Resources tree is release-ready: CITATION.cff declares 2.0.0, the changelog section extracts, and all four release gates pass locally (2026-09-07). Cutting the release is a one-click Actions run; see the runbook. | **blocked on release** |
+| 2 | SCAN-Resources 2.0.0 released 2026-09-07 (commit 2155c39) and deposited as version DOI 10.5281/zenodo.22598618 under concept DOI 10.5281/zenodo.14053202 (record title "SCAN-Resources: Instruments and Training Datasets for the Synthetic Cognitive Augmentation Network", version 2.0.0, creator Tate, Levy). Filled in below. The release was cut after PR #5 merged, so the deposit also carries instrument 2.0.0 (Sections A and D reworded); the letter now says so in one sentence, since a reader following the DOI will find item wording that differs from the chapter's Appendix A. | done |
 | 3 | Diff every **Published** passage in Parts I and II against the chapter text. Done 2026-09-07 against the submitted manuscript with appendices (Drive: `…Submission_With_Appendices_Edit12.pdf`, 2025-10-12): all five Part I passages match verbatim; the Appendix B labels, ranges, and Global Note match; the reference-list defects (truncated `140532`, shared `15867066`, Ostrau et al. cited six times with no entry) are all present in the manuscript. Two labels in this file were abbreviated and are now quoted exactly. Remaining: a final read against the **typeset** chapter PDF, which is not in Drive. | done against manuscript; typeset check pending |
 | 4 | Attach `Appendix-B-Scoring-v2.0` rendered to PDF. Rendered 2026-09-07 from `Forms/Appendix-B-Scoring-v2.0.md` (SCAN-Resources `main`, 67532d5) with headless Chromium; the identifying-metadata guard from that repository's CI reports 0 hits on it. Delivered as a file (200 KB); attach it when sending. | rendered; attach at send |
 | 5 | Confirm the recipient addresses with IGI Global's current editorial contact, and copy the volume editor. The Gmail draft is addressed to `bookproofing@igi-global.com`, cc `cust@igi-global.com` and `ZianShah.Kabir@uts.edu.au`. Neither IGI address appears in any prior correspondence in the mailbox; the only IGI contact on record is Cassandra Martin (acquisitions, `cmartin@igi-global.com`, 2026-01-12), who is not the right desk for a correction but can redirect. | pending confirmation |
@@ -220,10 +220,13 @@ responses, it cannot be migrated.
 
 **Authoritative version.** The corrected scoring model is maintained openly in the
 SCAN-Resources repository and archived on Zenodo as scoring model 2.0.0 (version DOI
-10.5281/zenodo.[SCAN-RESOURCES-2.0.0-DOI]; concept DOI 10.5281/zenodo.14053202), with a full
-changelog of the corrections and a script that checks the model against a worked example and
-against regressions for each of the errors above. The attached appendix is a
-publication-ready extract of it.
+10.5281/zenodo.22598618; concept DOI 10.5281/zenodo.14053202), with a full changelog of the
+corrections and a script that checks the model against a worked example and against
+regressions for each of the errors above. The attached appendix is a publication-ready extract
+of it. That release also carries a reworded edition of the questionnaire (instrument 2.0.0, in
+which the item text of Sections A and D was rewritten; item count, response scales, and scoring
+are unchanged). The chapter's Appendix A remains instrument 1.0.0, and the attached appendix
+scores it as published.
 
 ---
 
@@ -263,7 +266,7 @@ V1 spiking pathway described above."*
 
 **Corrected.** The DOI is 10.5281/zenodo.14053202 (the SCAN-Resources concept DOI, which
 resolves to the latest version). Readers looking for the corrected scoring model should use
-the 2.0.0 version DOI given in Part II.
+the 2.0.0 version DOI given in Part II, 10.5281/zenodo.22598618.
 
 ### Ostrau et al. (2022) — missing entry
 
