@@ -19,7 +19,7 @@ chapter:
 |---|---|---|
 | 1 | STAC 4.0.0 version DOI: 10.5281/zenodo.22554655, minted 2026-09-06 under concept DOI 10.5281/zenodo.14545340 (record title "STAC: Spiking Transformer Augmenting Cognition", version 4.0.0, creator Kennedy, Ben). `https://doi.org/10.5281/zenodo.22554655` resolves; the concept DOI now resolves to it. Filled in below. | done |
 | 2 | Replace `[SCAN-RESOURCES-2.0.0-DOI]` with the version DOI for SCAN-Resources 2.0.0. Until that release is deposited, the SCAN-Resources concept DOI (10.5281/zenodo.14053202) resolves to 1.1.0, which still carries the **uncorrected** scoring, so the letter cannot go before it exists. | pending release |
-| 3 | Diff every **Published** passage in Parts I and II against the chapter PDF. The quotations were transcribed from the manuscript and have not been checked against the typeset text. | pending |
+| 3 | Every **Published** passage in Parts I and II was diffed against the final submitted manuscript (`Aligned Minds…_Submission_With_Appendices_Edit12.pdf`, 2025-10-12). Parts I ①–⑤ and the Appendix B labels and Global Note match verbatim; the Tate (2025a) entry was corrected here to the full published form. Ostrau et al. (2022) is cited exactly six times, the last immediately before the References heading, with no entry. Tate 2025a and 2025b both carry 10.5281/zenodo.15867066; 10.5281/zenodo.140532 appears three times and 10.5281/zenodo.14053202 never. **Still to confirm against the typeset proof**, which lives on IGI's proofing platform rather than in the manuscript: house-style copyedits, and the Appendix B table column alignment (extraction interleaves the columns, so the 6–12 Impulsivity row's label was read from row order rather than directly). | manuscript verified; proof pending |
 | 4 | Attach `Appendix-B-Scoring-v2.0` rendered to PDF (the source file carries no author metadata; keep it that way). | pending |
 | 5 | Confirm the recipient addresses with IGI Global's current editorial contact, and copy the volume editor. | pending |
 | 6 | Send from the address IGI Global has on file for the chapter author. | pending |
@@ -229,7 +229,7 @@ publication-ready extract of it.
 **Published**
 
 > Tate, L. (2025a). STAC V1 implementation in iLevyTate/stac (Version 2.0.0.3) [Computer
-> software].
+> software, Jupyter Notebook]. Zenodo. https://doi.org/10.5281/zenodo.15867066
 
 **Issue.** Tag `2.0.0.3` (commit `26e213d`, 2025-07-11) contains no V1 implementation, only
 `stac-v1/README.md`. The notebook `stac-v1/stacv1.ipynb` was committed 2025-07-13 (`7b09d54`),
