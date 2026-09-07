@@ -23,6 +23,11 @@
       "identifier": "https://github.com/iLevyTate/stac",
       "relation": "isSupplementTo",
       "scheme": "url"
+    },
+    {
+      "identifier": "10.5281/zenodo.14545340",
+      "relation": "isVersionOf",
+      "scheme": "doi"
     }
   ]
 }
