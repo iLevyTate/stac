@@ -1711,10 +1711,13 @@ def replace_attention_with_spikeattention(model, spiking=False):
                 "heads. K/V are repeated to match Q inside SpikeAttention."
             )
 
-        logger.warning(
-            "Llama-style conversion: SpikeAttention does not apply rotary position "
-            "embeddings (RoPE). Positional information from RoPE is therefore lost; "
-            "expect reduced fidelity relative to the original model."
+        # RoPE is applied inside SpikeAttention._apply_rope from the host's rotary
+        # embeddings (position_embeddings handed down by the decoder layer, or the
+        # replaced module's rotary_emb). The pre-4.0.0 warning that RoPE was dropped
+        # described the bug tests/test_rope_fidelity.py now guards against.
+        logger.info(
+            "Llama-style conversion: rotary position embeddings are applied inside "
+            "SpikeAttention from the host model's rotary_emb."
         )
 
         for layer in model.model.layers:
