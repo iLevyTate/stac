@@ -3,6 +3,32 @@
 All notable changes to STAC are recorded here. Versioning is milestone-based and tracked with
 git tags; the corresponding Zenodo deposit shares the same version.
 
+## [Unreleased]
+
+Found by running `notebooks/stac_v2_colab.ipynb` top to bottom on CPU (2026-09-07), which the
+corrigendum offers the chapter's editor as a verification path.
+
+### Fixed
+
+- `tests/test_multi_turn_coherence` asserted an absolute bar (80% of turns recalled) that
+  measured the base model, not the conversion: unconverted DistilGPT-2 recalls 3 of 10 turns
+  under the same procedure, so the notebook's §3 cell, which runs the suite against the real
+  model, showed one failure for a claim 4.0.0 had already withdrawn. The test now scores the
+  converted model against the unconverted one on the same prompts and requires parity within
+  one turn (ANN 30.0% vs SNN 30.0% on DistilGPT-2). CI, which runs the suite on the offline
+  fixture, still skips it there, as before.
+- `smollm2_converter` logged a warning on every Llama-family conversion that RoPE was not
+  applied and fidelity would suffer. That described the pre-4.0.0 bug; `SpikeAttention` has
+  applied RoPE since the fix (`tests/test_rope_fidelity.py`), and the notebook's §7 cell prints
+  a 1.4e-05 logit difference on SmolLM2-135M directly beneath the warning. It is now an info
+  line saying what actually happens.
+
+### Changed
+
+- Colab notebook: §3 explains what the coherence parity check measures, and §9 says the rebuild
+  must match the `--timesteps` and `--components` used in §8 (the CPU probe settings the §8
+  comment suggests otherwise load with missing keys and generate a repeated token).
+
 ## [4.0.0] — 2026-08-04
 
 A correctness-and-honesty release. An audit established that STAC's spiking pathway had never
