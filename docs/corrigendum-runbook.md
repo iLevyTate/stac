@@ -16,42 +16,30 @@ Updated 2026-09-07.
 | Reference-list section reconciled | Tate (2025a) → 4.0.0 DOI; Tate (2025b) keeps 15867066 (confirmed to be the 2.0.0.3 record); Tate (2024c) → 14053202; Ostrau et al. (2022) added |
 | Signature | Ben Kennedy, Capitol Technology University, matching the chapter byline |
 | Reproduction | `python scripts/verify_v1_corrigendum.py` on `main` reproduces every figure the letter quotes (log in `corrigendum-2026-07.md`) |
-| CI | green on `main` at fabab59 (run 54) |
+| CI | green on `main` at fabab59 (run 54); the same steps re-run locally on 397c058: 63 passed, 3 skipped |
+| Colab notebook | §3–§9 run on CPU 2026-09-07; two defects it surfaced are fixed (see step 5) |
 | Quoted passages | all five Part I passages and the Appendix B tables match the submitted manuscript verbatim |
 | Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md`, metadata guard clean, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record) |
-| Gmail draft | "Correction request — chapter DOI 10.4018/979-8-3373-5702-7.ch005", in the gmail.com account, body identical to the letter, one placeholder left for the SCAN-Resources DOI |
+| Gmail draft | "Correction request — chapter DOI 10.4018/979-8-3373-5702-7.ch005", in the gmail.com account, body identical to the letter, no placeholders left |
 | Branch housekeeping | the two audit branches are already deleted on origin; only `main` remains |
 
 ## Remaining, in dependency order
 
-### 1. Cut SCAN-Resources 2.0.0 (you; one click; irreversible because it mints a DOI)
+### 1. Cut SCAN-Resources 2.0.0 — done 2026-09-07
 
-The letter says the corrected scoring model is "archived on Zenodo as scoring model 2.0.0". Today
-the SCAN-Resources concept DOI resolves to 1.1.0, which carries the scoring the letter retracts.
-Nothing else in this list can finish before this.
+Released from commit 2155c39 (after PR #5 merged) as
+https://github.com/iLevyTate/SCAN-Resources/releases/tag/2.0.0; Zenodo minted version DOI
+10.5281/zenodo.22598618 the same day. Because PR #5 was in the tree, the deposit carries
+instrument 2.0.0 (Sections A and D reworded) alongside scoring model 2.0.0, and the GitHub
+release notes, extracted from the changelog's scoring-model section, omit the instrument
+rework. The SCAN-Resources changelog now records what actually shipped; the release notes on
+GitHub can be edited by hand to match (Releases → 2.0.0 → edit) but nothing depends on it.
 
-Decide first whether [PR #5](https://github.com/iLevyTate/SCAN-Resources/pull/5) (reworded
-Sections A and D, instrument 2.0.0) merges before or after the release. If before, the release
-tree no longer matches the letter's "instrument version 1.0.0, unchanged" statement and the
-changelog needs an entry for it. The simpler path: release 2.0.0 from `main` as it stands
-(67532d5), then merge PR #5 as a later release.
+### 2. Fill the SCAN-Resources DOI everywhere — done 2026-09-07
 
-Then: https://github.com/iLevyTate/SCAN-Resources/actions/workflows/release.yml → *Run workflow*
-→ branch `main` → tag `2.0.0` → leave pre-release unchecked → *Run workflow*. The workflow
-re-runs the scoring self-test, both dataset validators, and the PDF metadata guard before it
-creates the release; all four passed locally on 2026-09-07. Zenodo picks the release up within
-a few minutes.
-
-Then say "SCAN-Resources released" and the rest of step 2 is scripted.
-
-### 2. Fill the SCAN-Resources DOI everywhere (me, after step 1)
-
-- Read the new version DOI from https://zenodo.org/api/records/14053202 (it redirects to the
-  latest version).
-- Replace `[SCAN-RESOURCES-2.0.0-DOI]` in `docs/corrigendum-combined.md` and in the Gmail draft.
-- Add the version DOI to SCAN-Resources `CITATION.cff` under `identifiers:` and drop the
-  "pending" comment there.
-- Re-check every DOI in both trees resolves.
+Version DOI 10.5281/zenodo.22598618 is in `docs/corrigendum-combined.md` (Part II and Part
+III), the Gmail draft, SCAN-Resources `CITATION.cff` and README. The letter gained one sentence
+noting the instrument 2.0.0 rework in the deposit. Every DOI in both trees resolves.
 
 ### 3. Confirm the recipients (you)
 
@@ -67,10 +55,15 @@ The quotations were diffed against the submitted manuscript, not the typeset cha
 have the publisher's final PDF, open it at the five Part I locations and Appendix B and confirm
 nothing was changed in copy-editing. Send it to me and I will diff it.
 
-### 5. Colab (you)
+### 5. Colab — done 2026-09-07 (CPU)
 
-Open `notebooks/stac_v2_colab.ipynb` from `main` in Google Colab and run it top to bottom. Part
-IV offers it to the editor; it should have been run once from a clean session by the author.
+Every section of `notebooks/stac_v2_colab.ipynb` was executed cell by cell on CPU against
+`main`; the numbers are in the verification log in `corrigendum-2026-07.md`. The run found two
+things an editor would have seen and both are fixed: §3 reported one failed test (an absolute
+coherence bar that the unconverted base model also fails; now a parity test), and §7 logged a
+warning that RoPE is dropped directly above a result proving it is applied. A GPU run of §8 at
+the notebook's default settings is optional; the CPU probe already shows the perplexity
+recovery (18,468 → 1,137 in 50 steps).
 
 ### 6. Send (you)
 
@@ -87,6 +80,8 @@ Add the send date, recipients, and any ticket number to the *Submission* section
 
 ## Not blocking
 
+- [PR #5](https://github.com/iLevyTate/SCAN-Resources/pull/5) merged before the release rather
+  than after, so there is no separate instrument-2.0.0 release to cut. Nothing further needed.
 - The other IGI chapter, "Beyond Intelligence: The Synthetic Cognitive Augmentation Network
   Using Experts" (*Ensuring Secure and Ethical STM Research in the AI Era*). If it reproduces
   the Appendix B scoring tables, it needs the same correction. Not checked; the draft is in

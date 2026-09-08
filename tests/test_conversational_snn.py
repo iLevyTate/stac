@@ -868,21 +868,13 @@ def _uses_random_weight_fixture(args) -> bool:
         return False
 
 
-def test_multi_turn_coherence(model, tokenizer, args):
-    """Validate context retention across conversation turns with specific coherence tests."""
-    logger.info("Running: test_multi_turn_coherence")
-
-    # This is the one test here that measures *language quality*: it looks for expected
-    # keywords in generated text. A randomly-initialised fixture cannot produce them, so
-    # asserting on its output would test nothing. Declare the precondition rather than
-    # leaving a permanently red result that trains people to ignore it.
-    if _uses_random_weight_fixture(args):
-        msg = (
-            f"{args.model_name} is a randomly-initialised test fixture; keyword coherence "
-            "requires a trained model (e.g. STAC_TEST_MODEL=distilgpt2)."
-        )
-        logger.warning(f"SKIP: test_multi_turn_coherence — {msg}")
-        pytest.skip(msg)
+def _coherence_pass_rate(model, tokenizer, args, label):
+    """
+    Run the keyword-recall scenarios against `model` and return
+    (pass_rate_percent, per-turn records). Shared by the ANN baseline and the SNN run in
+    test_multi_turn_coherence, so both are scored by exactly the same procedure.
+    """
+    logger.info(f"Multi-turn coherence scenarios: {label}")
     device = args.device if hasattr(args, 'device') else ('cuda' if torch.cuda.is_available() else 'cpu')
     max_new_tokens_per_turn = args.max_new_tokens_per_turn if hasattr(args, 'max_new_tokens_per_turn') else 20 # Default
 
@@ -1032,38 +1024,67 @@ def test_multi_turn_coherence(model, tokenizer, args):
                 'passed': keywords_test_passed
             })
     
-    # Final summary
-    logger.info("\n=== Multi-turn Coherence Test Summary ===")
+    # Summary for this model
+    logger.info(f"\n=== Multi-turn coherence summary: {label} ===")
     tests_passed = 0
     tests_failed = 0
-    
+
     for ctx in all_contexts:
         if ctx['passed']:
             tests_passed += 1
         else:
             tests_failed += 1
-            logger.error(f"Failed: Test {ctx['test_idx']+1}, Turn {ctx['turn_idx']+1}")
-            logger.error(f"  Question: \"{ctx['question']}\"")
-            logger.error(f"  Response: \"{ctx['response']}\"")
-            logger.error(f"  Missing keywords: {ctx['missing_keywords']}")
-    
-    pass_rate = (tests_passed / (tests_passed + tests_failed)) * 100 if (tests_passed + tests_failed) > 0 else 0
-    logger.info(f"Tests passed: {tests_passed}/{tests_passed + tests_failed} ({pass_rate:.1f}%)")
-    
-    # Overall test passes if a majority of keyword tests pass (80% or higher)
-    overall_pass_threshold = 0.8
-    overall_pass = pass_rate >= (overall_pass_threshold * 100)
-    
-    if overall_pass:
-        logger.info(f"PASS: test_multi_turn_coherence with {pass_rate:.1f}% success rate")
-    else:
-        logger.error(f"FAIL: test_multi_turn_coherence with only {pass_rate:.1f}% success rate (threshold: {overall_pass_threshold * 100:.1f}%)")
+            logger.info(f"Missed: Test {ctx['test_idx']+1}, Turn {ctx['turn_idx']+1}")
+            logger.info(f"  Question: \"{ctx['question']}\"")
+            logger.info(f"  Response: \"{ctx['response']}\"")
+            logger.info(f"  Missing keywords: {ctx['missing_keywords']}")
 
-    assert overall_pass, (
-        f"multi-turn coherence success rate {pass_rate:.1f}% is below the "
-        f"{overall_pass_threshold * 100:.1f}% threshold"
+    pass_rate = (tests_passed / (tests_passed + tests_failed)) * 100 if (tests_passed + tests_failed) > 0 else 0
+    logger.info(f"{label}: {tests_passed}/{tests_passed + tests_failed} turns recalled ({pass_rate:.1f}%)")
+    return pass_rate, all_contexts
+
+
+def test_multi_turn_coherence(ann_model, snn_model, tokenizer, args):
+    """
+    Context retention across conversation turns, scored as parity with the unconverted
+    model.
+
+    This is the one test here that looks at generated *language*. It used to assert an
+    absolute bar (80% of turns recalled), which measured the base model rather than the
+    conversion: DistilGPT-2 itself recalls 3 of 10 turns under this procedure, so the
+    converted model failed the bar for exactly the same reason the original would have.
+    The claim the bar encoded ("retaining multi-turn conversational ability") was withdrawn
+    in 4.0.0. What the conversion is responsible for is not making things worse, so the
+    converted model is required to recall at least as many turns as the ANN, less a
+    one-turn allowance for greedy-decoding ties flipping on floating-point noise.
+    """
+    logger.info("Running: test_multi_turn_coherence")
+
+    # A randomly-initialised fixture recalls nothing either way, so parity would hold
+    # trivially and test nothing. Declare the precondition rather than leaving a
+    # permanently green result that means nothing.
+    if _uses_random_weight_fixture(args):
+        msg = (
+            f"{args.model_name} is a randomly-initialised test fixture; keyword coherence "
+            "requires a trained model (e.g. STAC_TEST_MODEL=distilgpt2)."
+        )
+        logger.warning(f"SKIP: test_multi_turn_coherence — {msg}")
+        pytest.skip(msg)
+
+    ann_rate, _ = _coherence_pass_rate(ann_model, tokenizer, args, "ANN (unconverted)")
+    snn_rate, snn_contexts = _coherence_pass_rate(snn_model, tokenizer, args, "SNN (converted)")
+
+    total_turns = len(snn_contexts)
+    one_turn = 100.0 / total_turns if total_turns else 0.0
+    logger.info(
+        f"Parity: ANN {ann_rate:.1f}% vs SNN {snn_rate:.1f}% "
+        f"(allowance one turn = {one_turn:.1f} points)"
     )
-    return overall_pass
+
+    assert snn_rate >= ann_rate - one_turn - 1e-6, (
+        f"converted model recalled {snn_rate:.1f}% of turns against {ann_rate:.1f}% for the "
+        f"unconverted model; conversion lost more than one turn of context"
+    )
 
 def test_energy_consumption(model, tokenizer, args):
     """Validate spike-based efficiency improvements using torch.profiler for both CPU/CUDA time and memory usage."""
