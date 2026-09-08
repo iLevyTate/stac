@@ -49,11 +49,16 @@ have the production or proofing contact from the chapter's proof stage, use that
 Failing that, Cassandra Martin (`cmartin@igi-global.com`, acquisitions, wrote on 2026-01-12) can
 redirect it.
 
-### 4. Typeset check (you, optional but recommended)
+### 4. Typeset check (you, recommended — one item is load-bearing)
 
 The quotations were diffed against the submitted manuscript, not the typeset chapter. If you
 have the publisher's final PDF, open it at the five Part I locations and Appendix B and confirm
 nothing was changed in copy-editing. Send it to me and I will diff it.
+
+One item there is not cosmetic. Text extraction interleaves the Appendix B table's columns, so
+the **6-12 Impulsivity row's label was read from row order rather than read directly** — and
+Correction (2) asserts that that label is inverted. It is the one correction in the letter
+resting on an inferred reading, so confirm that row against the typeset table before sending.
 
 ### 5. Colab — done 2026-09-07 (CPU)
 
