@@ -134,7 +134,7 @@ fine-tuning" — the comparison has no referent, since that term was identically
 **Published**
 
 > Tate, L. (2025a). STAC V1 implementation in iLevyTate/stac (Version 2.0.0.3) [Computer
-> software].
+> software, Jupyter Notebook]. Zenodo. https://doi.org/10.5281/zenodo.15867066
 
 **Issue** — tag `2.0.0.3` (commit `26e213d`, 2025-07-11) contains no V1 implementation, only
 `stac-v1/README.md`. The notebook `stac-v1/stacv1.ipynb` was committed 2025-07-13 (`7b09d54`),
