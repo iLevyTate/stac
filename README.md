@@ -1,224 +1,155 @@
-# STAC: Spiking Transformer Augmenting Cognition for Conversational AI
+# STAC: Spiking Transformer Augmenting Cognition
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14545340.svg)](https://doi.org/10.5281/zenodo.14545340)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Overview
+STAC converts pretrained transformer LLMs (e.g., DistilGPT-2, SmolLM2-1.7B-Instruct) into energy-efficient Spiking Neural Networks (SNNs) while preserving coherent multi-turn conversational ability.
 
-STAC (Spiking Transformer Augmenting Cognition) is a research framework that explores two complementary approaches to spiking neural network (SNN) language modeling:
+The repository contains two approaches:
 
-- **STAC V1**: A complete end-to-end training pipeline built around learnable Adaptive Exponential (AdEx) neurons. See `stac_v1/`.
-- **STAC V2**: An experimental conversion framework that transforms pretrained transformer language models (DistilGPT-2, SmolLM2-1.7B-Instruct) into SNNs. The conversion is numerically faithful with spiking *off*; with spiking *on*, a frozen converted model collapses and needs training to recover — and the projected energy of the current design is worse than the dense ANN. See [`docs/findings-summary.md`](docs/findings-summary.md).
+- **V1** (`stac_v1/`): End-to-end training pipeline built around learnable Adaptive Exponential (AdEx) neurons, with a Hyperdimensional Memory Module (HEMM) and surrogate-gradient training.
+- **V2**: ANN-to-SNN conversion framework that takes an existing transformer and replaces dense operations with spiking equivalents via SpikingJelly. The conversion is numerically faithful with spiking off; with spiking on, a frozen converted model collapses and needs training to recover.
 
-> **Important**: This repository currently runs *software-level* SNN simulations only. No
-> metrics have been collected on physical neuromorphic hardware. Energy figures are
-> operation-count projections produced by [`spike_metrics.py`](spike_metrics.py) — it
-> counts spikes and synaptic operations during a real forward pass and applies published
-> 45nm per-operation costs. Run it yourself; it currently projects that the converted V2
-> model would be **worse** than the dense ANN (see *Measured results* below).
-
-## Key Features
-
-- Proof-of-concept ANN-to-SNN conversion built on SpikingJelly.
-- Temporal Spike Processor for multi-turn KV-cache/state management (the mechanism; conversational quality under genuine spiking requires training).
-- Test coverage for position IDs, KV-cache behavior, and spike-rate sanity checks.
-- Hardware power profiling: planned, not yet implemented.
-- Full operator coverage and optimization: work in progress.
-
-> **Scope note on V2 conversion.** By default the V2 path produces a *structurally*
-> spiking model, not a spiking computation: `SpikeSoftmax` calls `torch.softmax` and the
-> LIF neurons in `SpikeAttention` are bypassed, so the network is stateless and running it
-> for `T` timesteps reproduces the same logits at `T` times the cost. This default exists
-> because it reproduces the source model exactly (see *Measured results*).
->
-> Pass `--real_spiking` for genuine spiking computation: Q/K/V are routed through the LIF
-> neurons and softmax is dropped (Spikformer-style spiking self-attention). This is off by
-> default because it changes the model's outputs — measure before relying on it.
+> **Simulation only.** All SNN execution is software-level. No metrics have been collected on physical neuromorphic hardware. Energy figures are operation-count projections from [`spike_metrics.py`](spike_metrics.py), which counts spikes and synaptic operations during a real forward pass and applies published 45nm per-operation costs.
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# Install
 pip install -r requirements.txt
 
-# 1b. (Optional) Build tiny local models so everything below runs without network access
+# (Optional) Build tiny local models for offline runs
 python scripts/make_test_models.py --out local/test-models
 
-# 2. Convert DistilGPT-2 to an SNN
+# Convert DistilGPT-2 to an SNN
 python scripts/run_conversion.py --model_name distilgpt2 --timesteps 8 --simplified
 
-# 3. Run a multi-turn conversation smoke test
+# Multi-turn conversation smoke test
 python tests/snn_multi_turn_conversation_test.py --mode snn --turns 3 --timesteps 8
 
-# 4. Run the comprehensive validation suite
+# Full validation suite
 python tests/test_conversational_snn.py --model_name distilgpt2 --test_all --timesteps 8
 ```
 
-## Core Components
+## How V2 Conversion Works
 
-### STAC V2
+By default, V2 produces a structurally spiking model that reproduces the source model to float precision. `SpikeSoftmax` calls `torch.softmax` and the LIF neurons in `SpikeAttention` are bypassed, so the network is stateless: running it for T timesteps reproduces the same logits at T times the cost.
 
-| Component | Purpose |
-|-----------|---------|
-| `smollm2_converter.py` | Specialized converter with `TemporalSpikeProcessor`. |
-| `convert.py` | Generic ANN-to-SNN conversion pipeline. |
-| `scripts/run_conversion.py` | Main CLI entry point for conversions. |
-| `spikingjelly_compat.py` | Cross-version compatibility layer for SpikingJelly. |
-| `tests/test_conversational_snn.py` | Comprehensive test suite. |
-| `tests/snn_multi_turn_conversation_test.py` | Lightweight multi-turn smoke test. |
+Pass `--real_spiking` for genuine spiking computation. Q/K/V route through LIF neurons and softmax is dropped (Spikformer-style spiking self-attention). This changes outputs, so measure before relying on it.
 
-### STAC V1
+### V2 Components
 
 | Component | Purpose |
-|-----------|---------|
-| `stac_v1/` | Runnable, importable V1 implementation (AdEx neurons, DLPFC layer, HEMM). |
-| `scripts/run_stac_v1.py` | CLI for the repo-native V1 hybrid fine-tuning pipeline (frozen GPT-2 with a trained spiking and memory head). |
-| `stac_v1/README.md` | V1 documentation and research notes. |
+|-----------|--------|
+| `smollm2_converter.py` | Specialized converter with `TemporalSpikeProcessor` |
+| `convert.py` | Generic ANN-to-SNN conversion pipeline |
+| `scripts/run_conversion.py` | CLI entry point for conversions |
+| `spikingjelly_compat.py` | Cross-version SpikingJelly compatibility layer |
+| `tests/test_conversational_snn.py` | Full test suite |
+| `tests/snn_multi_turn_conversation_test.py` | Lightweight multi-turn smoke test |
 
-## Implementation Status
+### V1 Components
 
-### STAC V2
+| Component | Purpose |
+|-----------|--------|
+| `stac_v1/` | V1 implementation (AdEx neurons, DLPFC layer, HEMM) |
+| `scripts/run_stac_v1.py` | CLI for hybrid fine-tuning (frozen GPT-2 + trained spiking/memory head) |
+| `stac_v1/README.md` | V1 documentation and research notes |
 
-**Completed (prototype level)**
-- Core conversion flow: GELU-to-ReLU substitution, quantization, and the `ann2snn` call
-  path. Note that SpikingJelly's `ann2snn.Converter` requires a `torch.fx`-traceable
-  model; HuggingFace causal LMs generally are not, so conversion falls back to the
-  simplified path. The fallback is logged and recorded in the saved metadata.
-- Temporal dynamics and KV-cache handling in PyTorch.
-- Loihi export gating (requires `EXPORT_LOIHI=1` and `lava.lib.dl.slayer`; otherwise the pipeline remains simulation-only and Loihi tests are skipped).
+## Measured Results
 
-- Spike-count telemetry and an operation-level energy projection (`spike_metrics.py`).
-- Genuine spiking attention behind `--real_spiking`, with grouped-query attention support
-  (SmolLM2-135M/360M).
+Every number below is produced by the repository and can be regenerated offline. They come from generated tiny fixtures (`scripts/make_test_models.py`) with **random weights**: they pin behavior, not language quality.
 
-**Pending or in progress**
-- Making spiking the default. It is opt-in until the quality cost is measured on a trained
-  model rather than the random-weight fixtures used offline.
-- Spiking activations *throughout* the network. The LIF neurons currently sit only on
-  Q/K/V, so just 5.5% of the model's MACs become accumulates — which is why the energy
-  projection is unfavourable (see *Measured results*). An advantage needs a spiking MLP
-  and residual stream.
-- Spiking dynamics in `--loihi_mode`. That path swaps attention for
-  `LoihiCausalContextMixer`, which removes the dense-attention blocker but is itself
-  non-spiking (tanh + a leaky context accumulator), so the resulting model contains no
-  spiking neurons at all and the constraints validator fails it accordingly.
-- Hardware benchmarking on Loihi-2 and Akida.
-- Expanded operator support (rotary embeddings, flash-attention variants, etc.).
-- Integration with the SCANUE multi-agent alignment layer.
-- CLI, UX, and documentation polish.
+### Conversion Fidelity (vs. unconverted model, T=8)
 
-### STAC V1
-
-**Completed (research prototype)**
-- End-to-end training pipeline with learnable AdEx neurons.
-- Hyperdimensional Memory Module (HEMM) integration, with causal pooling.
-- Surrogate-gradient training. `--dataset wikitext2` loads WikiText-2 when the optional
-  `datasets` package is installed; otherwise the built-in sample texts are used.
-- L1 spike regularization. Note this term was identically zero until the neurons were made
-  excitable — see the baseline below.
-- Validation suite covering the full pipeline, including a committed metrics baseline.
-
-## Measured results
-
-Every number below is produced by the repository itself and can be regenerated offline.
-They come from the generated tiny fixtures (`scripts/make_test_models.py`), which have
-**random weights** — they pin behaviour, not language quality.
-
-### Conversion fidelity (vs the unconverted model, T=8)
-
-| Mode | max abs logit difference | top-1 agreement | spiking neurons invoked |
+| Mode | Max abs logit diff | Top-1 agreement | Spiking neurons invoked |
 |---|---|---|---|
-| default (non-spiking) | 1.19e-07 | 100.0% | 0 / 6 |
+| Default (non-spiking) | 1.19e-07 | 100.0% | 0 / 6 |
 | `--real_spiking` | 8.44e-02 | 97.9% | 6 / 6 |
 
-The default reproduces the source model to float precision. With spiking enabled, T=1 and
-T=8 differ by 9.0e-02 — against 6.0e-08 (float noise) without it, which is the evidence
-that the timestep loop stopped being a no-op.
+With spiking enabled, T=1 and T=8 differ by 9.0e-02, compared to 6.0e-08 (float noise) without it. That gap confirms the timestep loop stopped being a no-op.
 
-### Energy projection (`spike_metrics.py`, tiny GPT-2, T=8, seq 32)
+### Energy Projection (tiny GPT-2, T=8, seq 32)
 
 | Quantity | Value |
 |---|---|
-| spike rate / sparsity | 0.094 / 90.6% |
-| spike-driven MACs | 65,536 of 1,180,672 (5.5%) |
-| projected SNN energy | 41.0 uJ |
-| projected ANN energy | 5.4 uJ |
-| **ratio** | **7.6x worse than the dense ANN** |
+| Spike rate / sparsity | 0.094 / 90.6% |
+| Spike-driven MACs | 65,536 of 1,180,672 (5.5%) |
+| Projected SNN energy | 41.0 μJ |
+| Projected ANN energy | 5.4 μJ |
+| **Ratio** | **7.6x worse than the dense ANN** |
 
-This is the honest result, and it is informative: only QK^T is spike-driven, and the
-remaining dense work is paid on every one of the T timesteps. An energy advantage requires
-spiking activations throughout the network, not only on Q/K/V.
+Only QKᵀ is spike-driven. The remaining dense work is paid on every timestep. An energy advantage requires spiking activations throughout the network, not only on Q/K/V.
 
-[`docs/energy-crossover.md`](docs/energy-crossover.md) works out what that would take. In
-short: the affordable timestep count is `T_max = 1 / (1 - f(1 - rho*r))`, set almost
-entirely by coverage `f` and barely at all by spike rate `rho`. The current 5.5% coverage
-affords `T <= 1.06`, so no genuinely spiking operating point wins. Coverage above 90% does
-win — and because `lm_head` is `d*V` while the body is `L*d^2`, that is far easier to reach
-on a large model than on this one: spiking the body of SmolLM2-1.7B reaches 94.3% coverage
-and projects 1.78x *better* at T=8. Much of the 7.6x above is an artifact of benchmarking a
-tiny model.
+[`docs/energy-crossover.md`](docs/energy-crossover.md) works out the break-even: affordable timestep count is `T_max = 1 / (1 - f(1 - ρr))`, driven almost entirely by coverage f. The current 5.5% coverage affords T ≤ 1.06, so no spiking operating point wins. Coverage above 90% does win. Spiking the body of SmolLM2-1.7B reaches 94.3% coverage and projects 1.78x *better* at T=8. Much of the 7.6x above is an artifact of benchmarking a tiny model.
 
 ```bash
 python scripts/energy_analysis.py --scaling          # coverage vs. model size
 python scripts/energy_analysis.py --arch smollm2-1.7b --seq_len 2048
 ```
 
+### V1 Baseline
+
+[`docs/baselines/stac_v1_smoke.json`](docs/baselines/stac_v1_smoke.json) records a reproducible 5-step run (spike rate 0.147, 86.8% sparsity, loss 5.83). Before the audit fixed the AdEx neurons, spike rate and L1 penalty were both exactly zero and the model produced identical logits at every position. `tests/test_v1_baseline.py` guards against regression.
+
+## Status
+
+### V2: Done (prototype)
+
+- Core conversion: GELU-to-ReLU substitution, quantization, `ann2snn` call path. SpikingJelly's `ann2snn.Converter` requires a `torch.fx`-traceable model; HuggingFace causal LMs are generally not, so conversion falls back to the simplified path (logged in saved metadata).
+- Temporal dynamics and KV-cache handling.
+- Loihi export gating (requires `EXPORT_LOIHI=1` and `lava.lib.dl.slayer`; otherwise simulation-only).
+- Spike-count telemetry and operation-level energy projection.
+- Genuine spiking attention behind `--real_spiking`, with grouped-query attention support (SmolLM2-135M/360M).
+
+### V2: Pending
+
+- Making spiking the default (opt-in until quality cost is measured on a trained model rather than random-weight fixtures).
+- Spiking activations throughout the network. LIF neurons sit only on Q/K/V (5.5% of MACs), which is why the energy projection is unfavorable. An advantage needs a spiking MLP and residual stream.
+- Spiking dynamics in `--loihi_mode` (currently swaps attention for `LoihiCausalContextMixer`, which is non-spiking).
+- Hardware benchmarking on Loihi-2 and Akida.
+- Expanded operator support (rotary embeddings, flash-attention variants).
+- Integration with the SCANUE multi-agent alignment layer.
+
+### V1: Done (research prototype)
+
+- End-to-end pipeline with learnable AdEx neurons.
+- HEMM integration with causal pooling.
+- Surrogate-gradient training (`--dataset wikitext2` loads WikiText-2 when the `datasets` package is installed; otherwise built-in sample texts).
+- L1 spike regularization (was identically zero until neurons were made excitable).
+- Validation suite with committed metrics baseline.
+
+## Testing
+
+Tests pin multi-turn behavior (cache state, position handling, spike rates). They guard against regressions; they do not by themselves demonstrate conversational quality under genuine spiking.
+
 ```bash
-python -c "
-from transformers import AutoModelForCausalLM
-from smollm2_converter import simplified_conversion
-from spike_metrics import measure_spikes
-import torch
-m = AutoModelForCausalLM.from_pretrained('local/test-models/tiny-gpt2')
-t = simplified_conversion(m, 8, skip_gelu_replacement=True, real_spiking=True)
-print(measure_spikes(t, torch.randint(0, 200, (1, 32)), use_cache=False).summary())"
-```
-
-### STAC V1 baseline
-
-[`docs/baselines/stac_v1_smoke.json`](docs/baselines/stac_v1_smoke.json) records a
-reproducible 5-step run (spike rate 0.147, 86.8% sparsity, loss 5.83). Before the audit
-fixed the AdEx neurons, spike rate and the L1 penalty were both exactly zero and the model
-produced identical logits at every position. `tests/test_v1_baseline.py` guards against
-returning to that state.
-
-## Documentation
-
-### STAC V2
-- [Conversion Workflow](docs/conversion_workflow.md): step-by-step conversion guide.
-- [API Reference](docs/api_reference.md): function and class documentation.
-- [Hardware Requirements](docs/hardware_requirements.md): system specifications.
-
-### STAC V1
-- [STAC V1 Documentation](stac_v1/README.md): end-to-end training pipeline documentation.
-- Run it with `python scripts/run_stac_v1.py --model_name sshleifer/tiny-gpt2 --steps 3`.
-
-## Testing and Validation
-
-The repository includes tests that pin multi-turn behavior (cache state, position handling, spike rates) — they guard against regressions, they do not by themselves demonstrate conversational quality under genuine spiking:
-
-```bash
-# Test specific components
+# Individual components
 python tests/test_conversational_snn.py --model_name distilgpt2 --test_position_boundaries
 python tests/test_conversational_snn.py --model_name distilgpt2 --test_attention_mask
 python tests/test_conversational_snn.py --model_name distilgpt2 --test_multi_turn
 python tests/test_conversational_snn.py --model_name distilgpt2 --test_energy
 
-# Run the full suite
+# Full suite
 python tests/test_conversational_snn.py --model_name distilgpt2 --test_all
 
-# Measure the quality cost of genuine spiking
+# Quality cost of genuine spiking
 python tests/test_conversational_snn.py --model_name distilgpt2 --real_spiking --test_fidelity
 ```
 
-The pytest suite runs offline: if the Hugging Face hub is unreachable and
-`STAC_TEST_MODEL` is unset, `tests/conftest.py` generates a tiny local model
-automatically.
+The pytest suite runs offline. If the Hugging Face hub is unreachable and `STAC_TEST_MODEL` is unset, `tests/conftest.py` generates a tiny local model automatically.
 
 ```bash
 python -m pytest tests/ -q
 ```
 
+## Docs
+
+- [Conversion Workflow](docs/conversion_workflow.md)
+- [API Reference](docs/api_reference.md)
+- [Hardware Requirements](docs/hardware_requirements.md)
+- [STAC V1 Documentation](stac_v1/README.md) (or run: `python scripts/run_stac_v1.py --model_name sshleifer/tiny-gpt2 --steps 3`)
+
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
