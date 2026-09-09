@@ -49,7 +49,15 @@ university mailbox: the proofing desk sent the typeset-proof notice for this boo
 2025-11-14, the submission system sent the chapter approval on 2025-10-24 with Dr. Kabir in
 copy and `cust@` as the support address. Nothing to change.
 
-### 4. Typeset check (you, optional)
+### 4. Typeset check (you) — one item now depends on it
+
+Crossref's record of the chapter (deposited by IGI on 2026-08-27, 40 references) lists
+Ostrau et al. (2022) as reference 21, alphabetically placed, while the truncated `140532`
+DOI and the duplicated `15867066` are still there. Production may have added the missing
+entry. The letter and the Gmail draft were reworded on 2026-09-09 so the Ostrau item is
+conditional ("if it was added in production please disregard that one item") and the
+letter is correct either way. Reading the typeset chapter's reference list would let you
+drop the item outright before sending.
 
 The quotations were diffed against the submitted manuscript, not the typeset chapter. The
 typeset proof is on IGI's platform at
@@ -87,6 +95,18 @@ run the metadata guard from that repository's `validate.yml` on the result befor
 
 Add the send date, recipients, and any ticket number to the *Submission* section of
 `corrigendum-2026-07.md`, and a line to `CHANGELOG.md`.
+
+## Copies in circulation (tell them once the letter goes)
+
+- James Tankard (jtankard@captechu.edu) received the full exegesis and all three chapters
+  as one attachment on 2026-05-14 for a design-science dissertation built on the SCAN
+  architecture. He holds the uncorrected STAC V1 account and the uncorrected Appendix B.
+- The researcher outreach script on Drive (`SCAN_Researcher_Outreach_Campaign.md`,
+  2026-06-07) describes STAC V1 as "a hybrid fine-tuned SNN-transformer with learnable AdEx
+  neurons, surrogate gradients, and L1 spike regularization" and SCANAQ as "drawn from eight
+  validated scales". If the campaign ran, those messages went out; the script needs the same
+  rewording before any further use.
+- No other outbound mail with the chapters attached was found in the gmail.com account.
 
 ## Not blocking
 
