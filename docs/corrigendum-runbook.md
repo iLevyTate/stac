@@ -19,9 +19,9 @@ Updated 2026-09-09.
 | CI | green on `main` at fabab59 (run 54); the same steps re-run locally on 397c058: 63 passed, 3 skipped |
 | Colab notebook | §3–§9 run on CPU 2026-09-07; two defects it surfaced are fixed (see step 5) |
 | Quoted passages | all five Part I passages and the Appendix B tables match the submitted manuscript verbatim |
-| Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md`, metadata guard clean, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record) |
-| Gmail draft | "Correction request — chapter DOI 10.4018/979-8-3373-5702-7.ch005", in the gmail.com account, body identical to the letter, no placeholders left |
-| Branch housekeeping | the two audit branches are already deleted on origin; only `main` remains |
+| Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md` (`main`, ae7c7d0) with headless Chromium on 2026-09-09, 8 pages, metadata guard 0 hits, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record). It is not attached to the draft; attach it at send. |
+| Gmail draft | "Correction request — chapter DOI 10.4018/979-8-3373-5702-7.ch005", in the gmail.com account, body identical to the letter, no placeholders left. Re-saved 2026-09-09 as plain text: the earlier save had wrapped every URL in a `google.com/url?q=` redirect, which would have gone out to the publisher. |
+| Branch housekeeping | Not done: origin still carries six branches besides `main` and the current working branch. `claude/stac-doi-metadata-wbiwdd` held one stranded commit (17ab08d, the full Tate (2025a) form in the two superseded drafts), cherry-picked on 2026-09-09; `claude/stac-doi-metadata-yw5zvv` is an older superset that `main` has overtaken; `docs/readme-rewrite` is PR #25, closed unmerged on 2026-09-09; the other three are fully merged. All six can be deleted. |
 
 ## Remaining, in dependency order
 
