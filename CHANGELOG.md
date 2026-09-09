@@ -29,6 +29,14 @@ corrigendum offers the chapter's editor as a verification path.
   must match the `--timesteps` and `--components` used in §8 (the CPU probe settings the §8
   comment suggests otherwise load with missing keys and generate a repeated token).
 
+### Added
+
+- `docs/exegesis-corrections.md`: the PhD exegesis restates the STAC V1 feasibility claim,
+  reproduces the chapter's Appendix B, and cites SCAN 1.0.0-alpha under the stac 2.0.0.3 DOI.
+  The file lists each passage with proposed wording for an addendum through the university.
+  The runbook and verification log record the 2026-09-09 check of the Springer SEET chapter
+  (no correction needed) alongside it.
+
 ## [4.0.0] — 2026-08-04
 
 A correctness-and-honesty release. An audit established that STAC's spiking pathway had never

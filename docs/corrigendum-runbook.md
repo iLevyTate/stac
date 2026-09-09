@@ -3,7 +3,7 @@
 Companion to [`corrigendum-combined.md`](corrigendum-combined.md) (the letter) and
 [`corrigendum-2026-07.md`](corrigendum-2026-07.md) (the technical account). This file is the
 operational checklist: what is done, what remains, who does it, and the exact click or command.
-Updated 2026-09-07.
+Updated 2026-09-09.
 
 ## Done
 
@@ -98,3 +98,29 @@ Add the send date, recipients, and any ticket number to the *Submission* section
   the SCANAQ appears only as an upcoming instrument, and STAC only as future work with no
   mechanism claim. Its four Zenodo references (Tate 2024a–d: 14052759, 14510407, 14053203,
   14545341) all resolve. No correction needed.
+- The Springer chapter, "Synthetic Cognitive Augmentation Network" (Kennedy, Mohammad,
+  Wyandt; *SEET 2025*, CCIS 2725, pp. 179–188, DOI 10.1007/978-3-032-08977-9_13, online
+  2026-01-02), checked 2026-09-09 against the SEET submission manuscript on Drive and the
+  Crossref reference deposit. STAC appears only as a future component and a pipeline diagram
+  (Fig. 1), with no mechanism or result claim; there is no scoring appendix. Its three Zenodo
+  references (SCANUE 14052759, SCAN-Resources 14053203, SCAN 14052885, all 1.0.0-alpha) resolve
+  through DataCite to the right records. One sentence in §2.2 of the manuscript, "Although
+  SCANAQ has not yet been implemented, it has been validated through current research,"
+  overstates the instrument's status (see SCAN-Resources `PROVENANCE.md`); it is a soft claim
+  with no dependent result, and the galley was not re-read for it. No correction letter to
+  Springer is warranted. The galley proof (`643787_1_En_13_Chapter_Author.pdf`, 2025-11-11)
+  sits in the university mailbox if a verbatim check is ever wanted.
+
+## Needs its own amendment
+
+- The PhD exegesis (June 2026) restates the STAC V1 feasibility claim in four places,
+  reproduces the chapter's Appendix B in full, and carries two reference-list defects of its
+  own, one of which (the SCAN 1.0.0-alpha entry pointing at the stac 2.0.0.3 DOI) does not
+  occur in any chapter. The passages and the proposed wording are in
+  [`exegesis-corrections.md`](exegesis-corrections.md). Route: the university's dissertation
+  office. This is independent of the IGI send and does not block it.
+- The ecosystem site (scanerad.com) carried a "3-4× less energy" claim, an estimated
+  performance chart with no source, a "validated" label on SCANAQ, and paper cards that
+  omitted the Springer chapter and pointed two cards at the same IGI chapter. Corrected on
+  2026-09-09 on branch `claude/eloquent-faraday-vdkqhl` of iLevyTate/ScanEcosystem; merge to
+  `main` to deploy.
