@@ -41,19 +41,21 @@ Version DOI 10.5281/zenodo.22598618 is in `docs/corrigendum-combined.md` (Part I
 III), the Gmail draft, SCAN-Resources `CITATION.cff` and README. The letter gained one sentence
 noting the instrument 2.0.0 rework in the deposit. Every DOI in both trees resolves.
 
-### 3. Confirm the recipients (you)
+### 3. Confirm the recipients — done 2026-09-09
 
 The draft goes to `bookproofing@igi-global.com`, cc `cust@igi-global.com` and the volume editor
-`ZianShah.Kabir@uts.edu.au`. No prior mail from either IGI address exists in the mailbox. If you
-have the production or proofing contact from the chapter's proof stage, use that address instead.
-Failing that, Cassandra Martin (`cmartin@igi-global.com`, acquisitions, wrote on 2026-01-12) can
-redirect it.
+`ZianShah.Kabir@uts.edu.au`. All three come from this chapter's own production trail in the
+university mailbox: the proofing desk sent the typeset-proof notice for this book on
+2025-11-14, the submission system sent the chapter approval on 2025-10-24 with Dr. Kabir in
+copy and `cust@` as the support address. Nothing to change.
 
 ### 4. Typeset check (you, optional)
 
-The quotations were diffed against the submitted manuscript, not the typeset chapter. If you
-have the publisher's final PDF, open it at the five Part I locations and Appendix B and confirm
-nothing was changed in copy-editing. Send it to me and I will diff it.
+The quotations were diffed against the submitted manuscript, not the typeset chapter. The
+typeset proof is on IGI's platform at
+`https://www.igi-global.com/submission/proofing/document/?did=152536` (login required;
+Chrome, Firefox, or Edge). Open it at the five Part I locations and Appendix B and confirm
+nothing was changed in copy-editing, or save it as PDF and send it to me to diff.
 
 The one load-bearing item here is closed. The Appendix B tables had been read from interleaved
 text extraction, which left the 6–12 Impulsivity row's label inferred from row order. On
@@ -91,6 +93,8 @@ Add the send date, recipients, and any ticket number to the *Submission* section
 - [PR #5](https://github.com/iLevyTate/SCAN-Resources/pull/5) merged before the release rather
   than after, so there is no separate instrument-2.0.0 release to cut. Nothing further needed.
 - The other IGI chapter, "Beyond Intelligence: The Synthetic Cognitive Augmentation Network
-  Using Experts" (*Ensuring Secure and Ethical STM Research in the AI Era*). If it reproduces
-  the Appendix B scoring tables, it needs the same correction. Not checked; the draft is in
-  Drive ("Chapter 7 Beyond Intelligence …pdf").
+  Using Experts" (*Ensuring Secure and Ethical STM Research in the AI Era*), checked
+  2026-09-09 from the Drive manuscript (41 pages). It has no appendices and no scoring tables;
+  the SCANAQ appears only as an upcoming instrument, and STAC only as future work with no
+  mechanism claim. Its four Zenodo references (Tate 2024a–d: 14052759, 14510407, 14053203,
+  14545341) all resolve. No correction needed.
