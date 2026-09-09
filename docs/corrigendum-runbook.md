@@ -49,16 +49,19 @@ have the production or proofing contact from the chapter's proof stage, use that
 Failing that, Cassandra Martin (`cmartin@igi-global.com`, acquisitions, wrote on 2026-01-12) can
 redirect it.
 
-### 4. Typeset check (you, recommended — one item is load-bearing)
+### 4. Typeset check (you, optional)
 
 The quotations were diffed against the submitted manuscript, not the typeset chapter. If you
 have the publisher's final PDF, open it at the five Part I locations and Appendix B and confirm
 nothing was changed in copy-editing. Send it to me and I will diff it.
 
-One item there is not cosmetic. Text extraction interleaves the Appendix B table's columns, so
-the **6-12 Impulsivity row's label was read from row order rather than read directly** — and
-Correction (2) asserts that that label is inverted. It is the one correction in the letter
-resting on an inferred reading, so confirm that row against the typeset table before sending.
+The one load-bearing item here is closed. The Appendix B tables had been read from interleaved
+text extraction, which left the 6–12 Impulsivity row's label inferred from row order. On
+2026-09-09 the manuscript's Table B3 was extracted cell by cell and the page rendered and read
+as an image: row 5B is "High Motor Impulsivity, Low Non-Planning Impulsivity", 6–12,
+"Acts impulsively; limited advance planning." Correction ② stands on a direct read. What
+remains for the typeset PDF is house-style copyedits, which would change wording in the
+"Published" quotations but not the substance of any correction.
 
 ### 5. Colab — done 2026-09-07 (CPU)
 
