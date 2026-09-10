@@ -22,7 +22,7 @@ Status as of 2026-09-07. The step-by-step for the open rows is in
 |---|---|---|
 | 1 | STAC 4.0.0 version DOI: 10.5281/zenodo.22554655, minted 2026-09-06 under concept DOI 10.5281/zenodo.14545340 (record title "STAC: Spiking Transformer Augmenting Cognition", version 4.0.0, creator Kennedy, Ben). `https://doi.org/10.5281/zenodo.22554655` resolves; the concept DOI now resolves to it. Filled in below. | done |
 | 2 | SCAN-Resources 2.0.0 released 2026-09-07 (commit 2155c39) and deposited as version DOI 10.5281/zenodo.22598618 under concept DOI 10.5281/zenodo.14053202 (record title "SCAN-Resources: Instruments and Training Datasets for the Synthetic Cognitive Augmentation Network", version 2.0.0, creator Tate, Levy). Filled in below. The release was cut after PR #5 merged, so the deposit also carries instrument 2.0.0 (Sections A and D reworded); the letter now says so in one sentence, since a reader following the DOI will find item wording that differs from the chapter's Appendix A. | done |
-| 3 | Diff every **Published** passage in Parts I and II against the chapter text. Done 2026-09-07 against the submitted manuscript with appendices (Drive: `…Submission_With_Appendices_Edit12.pdf`, 2025-10-12): all five Part I passages match verbatim; the Appendix B labels, ranges, and Global Note match; the reference-list defects (truncated `140532`, shared `15867066`, Ostrau et al. cited six times with no entry) are all present in the manuscript. Two labels in this file were abbreviated and are now quoted exactly. The Appendix B column-alignment caveat is closed: on 2026-09-09 the manuscript's Table B2 and B3 were extracted cell by cell with PyMuPDF and the page rendered to an image and read directly. Row 5B reads "High Motor Impulsivity, Low Non-Planning Impulsivity", 6–12, items 13–18, "Acts impulsively; limited advance planning."; row 2B reads "Low Cognitive Reappraisal, High Expressive Suppression", 4–19; row 2A 20–28. Corrections ② and ③ rest on direct reads. Remaining: a read against the **typeset** chapter PDF for house-style copyedits only. It lives on IGI's proofing platform: `https://www.igi-global.com/submission/proofing/document/?did=152536` (from the 2025-11-14 proofing notice; login required, Chrome/Firefox/Edge). | done against manuscript; typeset check optional |
+| 3 | Diff every **Published** passage in Parts I and II against the chapter text. Done 2026-09-07 against the submitted manuscript with appendices (Drive: `…Submission_With_Appendices_Edit12.pdf`, 2025-10-12): all five Part I passages match verbatim; the Appendix B labels, ranges, and Global Note match; the reference-list defects (truncated `140532`, shared `15867066`, Ostrau et al. cited six times with no entry) are all present in the manuscript. Two labels in this file were abbreviated and are now quoted exactly. The Appendix B column-alignment caveat is closed: on 2026-09-09 the manuscript's Table B2 and B3 were extracted cell by cell with PyMuPDF and the page rendered to an image and read directly. Row 5B reads "High Motor Impulsivity, Low Non-Planning Impulsivity", 6–12, items 13–18, "Acts impulsively; limited advance planning."; row 2B reads "Low Cognitive Reappraisal, High Expressive Suppression", 4–19; row 2A 20–28. Corrections ② and ③ rest on direct reads. One item is now in doubt: Crossref's record of the chapter (deposited by IGI on 2026-08-27, 40 references) lists Ostrau et al. (2022) as reference 21, in alphabetical position, while still carrying the truncated `140532` DOI and the duplicated `15867066`. That is consistent with production having added the missing entry. The letter's Ostrau item is now worded conditionally (Part III) so the letter stays correct either way; a read of the typeset chapter would settle it. The typeset proof lives on IGI's proofing platform: `https://www.igi-global.com/submission/proofing/document/?did=152536` (from the 2025-11-14 proofing notice; login required, Chrome/Firefox/Edge). | done against manuscript; Ostrau item conditional pending typeset read |
 | 4 | Attach `Appendix-B-Scoring-v2.0` rendered to PDF. Rendered 2026-09-07 from `Forms/Appendix-B-Scoring-v2.0.md` (SCAN-Resources `main`, 67532d5) with headless Chromium; the identifying-metadata guard from that repository's CI reports 0 hits on it. Delivered as a file (200 KB); attach it when sending. | rendered; attach at send |
 | 5 | Confirm the recipient addresses with IGI Global's current editorial contact, and copy the volume editor. Confirmed 2026-09-09 from the chapter's own production trail in the university mailbox: `bookproofing@igi-global.com` sent the typeset-proof notice for this book on 2025-11-14 ("IGI Global Proofing: Innovative Decision-Making in Engineering 9798337357027"), and `booksubmissionsystemadmin@igi-global.com` sent the 2025-10-24 chapter approval with `ZianShah.Kabir@uts.edu.au` in copy and named `cust@igi-global.com` as the support address. The draft's To and cc lines are exactly those three addresses. | done |
 | 6 | Send from the address IGI Global has on file for the chapter author (`bkennedy1@captechu.edu`; IGI's January 2026 mail went there). The draft sits in the gmail.com account, so it has to be forwarded or re-sent from the university address. | pending |
@@ -85,11 +85,17 @@ Send only when every row reads done. Record the send date in
 > if it could be substituted for the original in the online version where the format allows
 > (Part II below).
 >
-> **3. Reference list.** While preparing this request I found four reference-list issues,
-> including a truncated DOI and a work cited six times in the text with no entry in the list.
-> The corrected entries are in Part III. The software and data cited in the chapter are
-> deposited on Zenodo under "Tate, L.", the alias I publish repository releases under; the
-> corrected entries keep that form so the in-text citations continue to resolve.
+> **3. Reference list.** While preparing this request I found four reference-list issues in
+> the submitted manuscript: a truncated DOI, one DOI shared by two entries, a version that does
+> not contain the cited artefact, and a work cited six times in the text with no entry in the
+> list. Crossref's record of the published chapter does list that last work, so if it was added
+> in production please disregard that one item; the other three stand. The corrected entries are
+> in Part III. The software and data cited in the chapter were deposited on Zenodo under
+> "Tate, L.", an alias I published repository releases under. The STAC 4.0.0 deposit cited in
+> the corrected entry carries my own name, with the alias recorded in its citation metadata.
+> The corrected entries keep the "Tate, L." form so the in-text citations continue to resolve;
+> if house style requires the deposit's author of record, that one entry should read
+> Kennedy, B. (2026) and its in-text citations change to match.
 >
 > Every claim in Part I is reproducible from the cited repository, and Part IV describes how.
 > Whether this is best handled as proof corrections, an erratum linked to the chapter's online
@@ -271,9 +277,11 @@ the 2.0.0 version DOI given in Part II, 10.5281/zenodo.22598618.
 ### Ostrau et al. (2022) — missing entry
 
 **Issue.** Cited in the text six times, including in the Abstract, but absent from the
-reference list.
+reference list of the submitted manuscript. Crossref's record of the published chapter
+(deposited 2026-08-27) does include this entry, so it may have been added in production; if
+the typeset chapter already carries it, this item needs no action.
 
-**Add:**
+**Add, if absent:**
 
 > Ostrau, C., Klarhorst, C., Thies, M., & Rückert, U. (2022). Benchmarking neuromorphic
 > hardware and its energy expenditure. *Frontiers in Neuroscience, 16*, 873935.
