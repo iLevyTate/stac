@@ -13,7 +13,7 @@ Updated 2026-09-09.
 | Zenodo 4.0.0 deposit | https://doi.org/10.5281/zenodo.22554655; concept DOI 10.5281/zenodo.14545340 resolves to it |
 | DOI metadata corrected | `CITATION.cff` and README badge carry the concept DOI; 18023657 listed as the 3.0.0-beta version DOI; `.zenodo.json` declares `isVersionOf` the concept DOI |
 | Two drafts merged into one letter | `docs/corrigendum-combined.md`; the two source drafts carry a superseded notice |
-| Reference-list section reconciled | Tate (2025a) → 4.0.0 DOI; Tate (2025b) keeps 15867066 (confirmed to be the 2.0.0.3 record); Tate (2024c) → 14053202; Ostrau et al. (2022) added |
+| Reference-list section reconciled | Tate (2025a) → 4.0.0 DOI; Tate (2025b) keeps 15867066 (confirmed to be the 2.0.0.3 record); Tate (2024c) → 14053202; Ostrau et al. (2022) added conditionally (Crossref shows it in the published list; see step 4). The 4.0.0 deposit's author of record is "Kennedy, Ben" (DataCite), not "Tate, L."; the cover note now says so and offers the editor the Kennedy, B. (2026) form. |
 | Signature | Ben Kennedy, Capitol Technology University, matching the chapter byline |
 | Reproduction | `python scripts/verify_v1_corrigendum.py` on `main` reproduces every figure the letter quotes (log in `corrigendum-2026-07.md`) |
 | CI | green on `main` at fabab59 (run 54); the same steps re-run locally on 397c058: 63 passed, 3 skipped |
@@ -107,6 +107,12 @@ Add the send date, recipients, and any ticket number to the *Submission* section
   validated scales". If the campaign ran, those messages went out; the script needs the same
   rewording before any further use.
 - No other outbound mail with the chapters attached was found in the gmail.com account.
+- An unpublished draft on Drive, "SCANAQ and SCANUE: Bridging Psychometrics and AI for
+  Personalized Cognitive Augmentation" (Kennedy, Mohammad, Wyandt; last edited 2025-04-19),
+  cites "SCANAQ's scoring rubric (Tate et al., 2024a)" and walks a worked example through
+  it. No venue, acceptance mail, or DOI for it was found; the exegesis lists three
+  publications, not four. If it is ever submitted, the rubric reference and the worked
+  example must move to scoring model 2.0.0 first.
 
 ## Not blocking
 

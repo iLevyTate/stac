@@ -90,9 +90,12 @@ Send only when every row reads done. Record the send date in
 > not contain the cited artefact, and a work cited six times in the text with no entry in the
 > list. Crossref's record of the published chapter does list that last work, so if it was added
 > in production please disregard that one item; the other three stand. The corrected entries are
-> in Part III. The software and data cited in the chapter are
-> deposited on Zenodo under "Tate, L.", the alias I publish repository releases under; the
-> corrected entries keep that form so the in-text citations continue to resolve.
+> in Part III. The software and data cited in the chapter were deposited on Zenodo under
+> "Tate, L.", an alias I published repository releases under. The STAC 4.0.0 deposit cited in
+> the corrected entry carries my own name, with the alias recorded in its citation metadata.
+> The corrected entries keep the "Tate, L." form so the in-text citations continue to resolve;
+> if house style requires the deposit's author of record, that one entry should read
+> Kennedy, B. (2026) and its in-text citations change to match.
 >
 > Every claim in Part I is reproducible from the cited repository, and Part IV describes how.
 > Whether this is best handled as proof corrections, an erratum linked to the chapter's online

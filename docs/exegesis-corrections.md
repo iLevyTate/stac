@@ -116,6 +116,7 @@ Part II of [`corrigendum-combined.md`](corrigendum-combined.md). Replace the app
 | Tate, L., & Sanders, P. (2024). iLevyTate/SCAN (Version 1.0.0-alpha) | 10.5281/zenodo.**15867066** | That DOI is the *stac* 2.0.0.3 record (DataCite: "iLevyTate/stac: 2.0.0.3"), not SCAN. The Springer chapter cites SCAN 1.0.0-alpha correctly. | 10.5281/zenodo.14052885 |
 | Tate, L. (2025a). STAC V1 implementation (Version 2.0.0.3) | 10.5281/zenodo.15867066 | Same defect as the chapter: the tag has no V1 implementation, and the DOI is shared with (2025b). | Tate, L. (2026). STAC: Spiking Transformer Augmenting Cognition (Version 4.0.0). 10.5281/zenodo.22554655; in-text (2025a) → (2026) |
 | Tate, L. (2025b). STAC V2 implementation (Version 2.0.0.3) | 10.5281/zenodo.15867066 | Unchanged once (2025a) moves. | as is |
+| (author of record) | — | The 4.0.0 Zenodo deposit is under "Kennedy, Ben", the earlier deposits under "Levy Tate". An exegesis written under the author's own name can cite the 4.0.0 release as Kennedy, B. (2026) directly; the "Tate, L." form is only needed where existing in-text citations must keep resolving. | Kennedy, B. (2026) preferred here |
 | Kennedy, B. (2025a). Aligned minds and efficient machines … [Manuscript in preparation] | — | Superseded by Kennedy, B. (2026), the published chapter, which is also listed. Delete or merge. | — |
 
 Checked 2026-09-09: 14052759 (SCANUE 1.0.0-alpha), 14053203 (SCAN-Resources 1.0.0-alpha),
