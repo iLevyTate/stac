@@ -3,7 +3,7 @@
 Companion to [`corrigendum-combined.md`](corrigendum-combined.md) (the letter) and
 [`corrigendum-2026-07.md`](corrigendum-2026-07.md) (the technical account). This file is the
 operational checklist: what is done, what remains, who does it, and the exact click or command.
-Updated 2026-09-09.
+Updated 2026-09-11.
 
 ## Done
 
@@ -20,7 +20,7 @@ Updated 2026-09-09.
 | Colab notebook | §3–§9 run on CPU 2026-09-07; two defects it surfaced are fixed (see step 5) |
 | Quoted passages | all five Part I passages and the Appendix B tables match the submitted manuscript verbatim |
 | Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md` (`main`, ae7c7d0) with headless Chromium on 2026-09-09, 8 pages, metadata guard 0 hits, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record). It is not attached to the draft; attach it at send. |
-| Gmail draft | "Correction request — chapter DOI 10.4018/979-8-3373-5702-7.ch005", in the gmail.com account, body identical to the letter, no placeholders left. Re-saved 2026-09-09 as plain text: the earlier save had wrapped every URL in a `google.com/url?q=` redirect, which would have gone out to the publisher. |
+| Send copy | The Gmail draft cannot be used: Gmail rewrites every URL in a stored draft into a `google.com/url?q=` redirect, and it did so again after a clean re-save on 2026-09-10. On 2026-09-11 the draft was retitled "DO NOT SEND FROM GMAIL" and its body replaced with instructions; the send copy is the plain-text file `Correction-request-IGI-ch005.txt` (delivered as a file, body identical to this letter, six clean URLs), to be pasted into a new message from the university account. |
 | Branch housekeeping | Not done: origin still carries six branches besides `main` and the current working branch. `claude/stac-doi-metadata-wbiwdd` held one stranded commit (17ab08d, the full Tate (2025a) form in the two superseded drafts), cherry-picked on 2026-09-09; `claude/stac-doi-metadata-yw5zvv` is an older superset that `main` has overtaken; `docs/readme-rewrite` is PR #25, closed unmerged on 2026-09-09; the other three are fully merged. All six can be deleted. |
 
 ## Remaining, in dependency order
@@ -85,11 +85,16 @@ recovery (18,468 → 1,137 in 50 steps).
 
 ### 6. Send (you)
 
-Send from `bkennedy1@captechu.edu`, the address IGI has on file. The draft is in the gmail.com
-account, so either forward it to yourself and send from the university account, or copy the body.
-Attach `Appendix-B-Scoring-v2.0.pdf` (the rendered file from step 4 of the pre-send table; if it
-needs re-rendering, print `Forms/Appendix-B-Scoring-v2.0.md` from SCAN-Resources `main` to PDF and
-run the metadata guard from that repository's `validate.yml` on the result before attaching).
+Compose a new message in the `bkennedy1@captechu.edu` mailbox (the address IGI has on file).
+Do not forward the Gmail draft. Paste the body of `Correction-request-IGI-ch005.txt`, set the
+recipients from its header (To `bookproofing@igi-global.com`; Cc `ZianShah.Kabir@uts.edu.au`,
+`cust@igi-global.com`), use the subject "Correction request — chapter DOI
+10.4018/979-8-3373-5702-7.ch005", and attach `Appendix-B-Scoring-v2.0.pdf`. If the typeset
+reference list already carries Ostrau et al. (2022), delete the Ostrau block from Part III and
+the clause "and a work cited six times in the text with no entry in the list" from paragraph 3
+before sending. If the PDF needs re-rendering, print `Forms/Appendix-B-Scoring-v2.0.md` from
+SCAN-Resources `main` to PDF and run the metadata guard from that repository's `validate.yml`
+on the result before attaching.
 
 ### 7. Record it (me)
 
