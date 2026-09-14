@@ -121,9 +121,23 @@ corrections are confined to statements of mechanism:
 
 ### Submission
 
-Not yet sent. The combined letter is [`corrigendum-combined.md`](corrigendum-combined.md);
-the remaining steps are in [`corrigendum-runbook.md`](corrigendum-runbook.md). Record the send
-date, recipients, and any ticket number here once it goes.
+**Sent 2026-09-13** from `bkennedy1@captechu.edu` to `bookproofing@igi-global.com`, copying the
+volume editor `ZianShah.Kabir@uts.edu.au` and `cust@igi-global.com`, subject "Correction request -
+chapter DOI 10.4018/979-8-3373-5702-7.ch005", with `Appendix-B-Scoring-v2.0.pdf` attached. The text
+as sent is [`corrigendum-sent-2026-09-13.md`](corrigendum-sent-2026-09-13.md); the working letter it
+was drawn from is [`corrigendum-combined.md`](corrigendum-combined.md).
+
+No ticket number was issued. The proofing desk returned an automatic reply at 23:08 UTC the same
+day which carries a warning worth recording:
+
+> Emails sent to the proofing inboxes (bookproofing@igi-global.com and
+> journalproofing@igi-global.com) without a corresponding note in the proofing system will not be
+> seen by the typesetter in time for the changes to be implemented.
+
+That inbox is described in the same reply as "loosely monitored". The request may therefore need a
+second route: the volume editor directly (already copied), `cust@igi-global.com` (already copied),
+or a note in IGI's proofing system against this chapter. See step 8 of
+[`corrigendum-runbook.md`](corrigendum-runbook.md).
 
 ### Citation accuracy
 

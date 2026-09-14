@@ -31,6 +31,11 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Added
 
+- `docs/corrigendum-sent-2026-09-13.md`: the combined corrigendum as it went to the
+  publisher on 2026-09-13, with the recipients, the attachment, and the presentational differences
+  from the working letter recorded. The proofing desk returned only an automatic reply, which warns
+  that mail to that inbox without a matching note in IGI's proofing system may not reach the
+  typesetter; `docs/corrigendum-runbook.md` step 8 carries the escalation routes.
 - `docs/exegesis-corrections.md`: the PhD exegesis restates the STAC V1 feasibility claim,
   reproduces the chapter's Appendix B, and cites SCAN 1.0.0-alpha under the stac 2.0.0.3 DOI.
   The file lists each passage with proposed wording for an addendum through the university.

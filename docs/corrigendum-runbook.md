@@ -3,7 +3,7 @@
 Companion to [`corrigendum-combined.md`](corrigendum-combined.md) (the letter) and
 [`corrigendum-2026-07.md`](corrigendum-2026-07.md) (the technical account). This file is the
 operational checklist: what is done, what remains, who does it, and the exact click or command.
-Updated 2026-09-11.
+Updated 2026-09-14.
 
 ## Done
 
@@ -20,7 +20,7 @@ Updated 2026-09-11.
 | Colab notebook | §3–§9 run on CPU 2026-09-07; two defects it surfaced are fixed (see step 5) |
 | Quoted passages | all five Part I passages and the Appendix B tables match the submitted manuscript verbatim |
 | Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md` (`main`, ae7c7d0) with headless Chromium on 2026-09-09, 8 pages, metadata guard 0 hits, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record). It is not attached to the draft; attach it at send. |
-| Send copy | The Gmail draft cannot be used: Gmail rewrites every URL in a stored draft into a `google.com/url?q=` redirect, and it did so again after a clean re-save on 2026-09-10. On 2026-09-11 the draft was retitled "DO NOT SEND FROM GMAIL" and its body replaced with instructions; the send copy is the plain-text file `Correction-request-IGI-ch005.txt` (delivered as a file, body identical to this letter, six clean URLs), to be pasted into a new message from the university account. |
+| Send copy | The Gmail draft could not be used: Gmail rewrites every URL in a stored draft into a `google.com/url?q=` redirect, and did so again after a clean re-save. The draft was retitled "DO NOT SEND FROM GMAIL" and the letter was sent instead from a plain-text copy pasted into a new message from the university account. That copy is recorded as `corrigendum-sent-2026-09-13.md`. |
 | Branch housekeeping | Not done: origin still carries six branches besides `main` and the current working branch. `claude/stac-doi-metadata-wbiwdd` held one stranded commit (17ab08d, the full Tate (2025a) form in the two superseded drafts), cherry-picked on 2026-09-09; `claude/stac-doi-metadata-yw5zvv` is an older superset that `main` has overtaken; `docs/readme-rewrite` is PR #25, closed unmerged on 2026-09-09; the other three are fully merged. All six can be deleted. |
 
 ## Remaining, in dependency order
@@ -83,23 +83,40 @@ warning that RoPE is dropped directly above a result proving it is applied. A GP
 the notebook's default settings is optional; the CPU probe already shows the perplexity
 recovery (18,468 → 1,137 in 50 steps).
 
-### 6. Send (you)
+### 6. Send - done 2026-09-13
 
-Compose a new message in the `bkennedy1@captechu.edu` mailbox (the address IGI has on file).
-Do not forward the Gmail draft. Paste the body of `Correction-request-IGI-ch005.txt`, set the
-recipients from its header (To `bookproofing@igi-global.com`; Cc `ZianShah.Kabir@uts.edu.au`,
-`cust@igi-global.com`), use the subject "Correction request — chapter DOI
-10.4018/979-8-3373-5702-7.ch005", and attach `Appendix-B-Scoring-v2.0.pdf`. If the typeset
-reference list already carries Ostrau et al. (2022), delete the Ostrau block from Part III and
-the clause "and a work cited six times in the text with no entry in the list" from paragraph 3
-before sending. If the PDF needs re-rendering, print `Forms/Appendix-B-Scoring-v2.0.md` from
-SCAN-Resources `main` to PDF and run the metadata guard from that repository's `validate.yml`
-on the result before attaching.
+Sent from `bkennedy1@captechu.edu` to `bookproofing@igi-global.com`, copying
+`ZianShah.Kabir@uts.edu.au` and `cust@igi-global.com`, subject "Correction request - chapter DOI
+10.4018/979-8-3373-5702-7.ch005", with `Appendix-B-Scoring-v2.0.pdf` attached. The attachment was
+re-rendered in Times New Roman (Tinos, the metric-compatible substitute available on the build
+host) with all dashes removed; 7 pages, identifying-metadata guard clean. The body as sent is
+`corrigendum-sent-2026-09-13.md`.
 
-### 7. Record it (me)
+### 7. Record it - done 2026-09-14
 
-Add the send date, recipients, and any ticket number to the *Submission* section of
-`corrigendum-2026-07.md`, and a line to `CHANGELOG.md`.
+The send is recorded in the *Submission* section of `corrigendum-2026-07.md`, in row 6 of the
+pre-send table in `corrigendum-combined.md`, and in `CHANGELOG.md`.
+
+### 8. Watch for a human reply (you)
+
+The only response so far is an automatic one, sent 2026-09-13 at 23:08 UTC, and it flags a real
+delivery risk:
+
+> Emails sent to the proofing inboxes ... without a corresponding note in the proofing system will
+> not be seen by the typesetter in time for the changes to be implemented.
+
+The same reply calls the inbox "loosely monitored". Two things reduce the risk already: the volume
+editor and `cust@igi-global.com` were copied, and `cust@` is a staffed address. If no human replies
+by roughly 2026-09-18, escalate in this order:
+
+1. Reply directly to Dr. Kabir, since a volume editor can route a post-publication correction
+   internally.
+2. Add a note against this chapter in IGI's proofing system, which is what the auto-reply asks for:
+   `https://www.igi-global.com/submission/proofing/document/?did=152536` (login required).
+3. Use IGI Global's editorial contact form at `www.igi-global.com/contact/`, citing the chapter DOI
+   and the date of this message.
+
+Nothing in the letter needs changing for any of these routes; forward the sent message as-is.
 
 ## Copies in circulation (tell them once the letter goes)
 
