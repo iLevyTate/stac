@@ -67,6 +67,17 @@ Section names are the exegesis's own headings; the wording is from the 2025-12-1
 > fired and the surrogate gradient underflowed to zero, so the demonstration covers the
 > pipeline's construction rather than the contribution of its spiking components.
 
+> **Scope note, added 2026-09-14.** The amendments in items 1 to 3 say the spiking pathway was
+> inactive, which is true but narrower than what the code does. `scripts/verify_v1_downstream.py`
+> shows the consequence reached the whole model: because `DLPFCLayer` returns only spike tensors
+> and nothing carries the backbone's hidden state past it, a zero spike train left the output head
+> reading one constant vector. Two unlike inputs give bit-identical logits, and the GPT-2 backbone's
+> gradient was exactly zero although it was in the optimizer. As released, V1 was a constant
+> predictor. An examiner who asks what V1's loss curves measured deserves that answer, so the
+> phrase "the pipeline's construction" in item 3 should be read as construction only: no component
+> of the released model was trained except the output head and one bias vector. The wording above
+> stands; this note is the fuller account to give if pressed.
+
 ### 4. Findings Relative to the Guiding Questions, item 3
 
 **Draft text**
