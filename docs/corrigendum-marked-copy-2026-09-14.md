@@ -11,33 +11,47 @@ set expectations on scope:
 > the editorial managers for further review in order to grant a correction erratum to your
 > manuscript.
 
-The marked copy returned the same day is `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`:
-the publisher's own PDF with 16 annotations added using PyMuPDF, each anchored on the text it
+The marked copy returned on 2026-09-14 is `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`:
+the publisher's own PDF with 25 annotations added using PyMuPDF, each anchored on the text it
 concerns. It is not committed here; the source is the publisher's copyrighted typeset file.
 
 ## What the marked copy contains
 
 One `Text` (sticky note) annotation on printed p. 113 summarising the request and naming the
-three groups, plus 15 `Highlight` annotations carrying numbered comments. Every comment gives
+four groups, plus 24 `Highlight` annotations carrying numbered comments. Every comment gives
 the published wording, the replacement wording, and the reason.
 
 | # | Printed page | Group | Location |
 |---|---|---|---|
-| 1 | 113 | V1 mechanism | Abstract, "STAC V1 demonstrates a hybrid fine-tuning approach" |
-| 2 | 118 | V1 mechanism | "actively encouraged during fine-tuning through an L1 spike regularization term" |
-| 3 | 131 | V1 mechanism | "a landmark project designed to prove the fundamental viability" |
-| 4 | 133 | V1 mechanism | "This proxy provides a useful learning signal…" (the central correction) |
-| 5 | 134 | V1 mechanism | Integrated L1 Spike Regularization, audit note added after the paragraph |
-| 6 | 134 | V1 mechanism | "While STAC V1 demonstrated feasibility, its scaling limitations…" |
-| 7 | 136 | V1 mechanism | Deletion of the contrast with V1's L1 regularization |
-| 8 | 148 | Appendix B | Table 9, Section A inverted |
-| 9 | 148 | Appendix B | Table 10, Section B sums two constructs |
-| 10 | 149 | Appendix B | Table 11, Section C inverted |
-| 11 | 149 | Appendix B | Section E rule undefined for ties (43.4% of 3,125 patterns) |
-| 12 | 151 | Appendix B | Table 16, Section H empathy total |
-| 13 | 151 | Appendix B | Global Notes, reverse-keyed items summed raw |
-| 14 | 143 | References | Tate (2024c), truncated DOI `10.5281/zenodo.140532` |
-| 15 | 143 | References | Tate (2025a), wrong version and DOI shared with Tate (2025b) |
+| 1 | 113 | A, V1 mechanism | Abstract, "STAC V1 demonstrates a hybrid fine-tuning approach" |
+| 2 | 118 | A | "established a complete, end-to-end differentiable pipeline" |
+| 3 | 118 | A | "actively encouraged during fine-tuning through an L1 spike regularization term" |
+| 4 | 118 | A | "The maturity of this version was confirmed by a comprehensive validation suite"; "was a successful" |
+| 5 | 119 | D, "validated" | "a validated psychometric-to-agent mapping methodology" (carries the group's reasoning) |
+| 6 | 120 | A | "a hybrid model that fine-tunes a pre-trained transformer and SNN model" |
+| 7 | 123 | D | "creates a direct, empirically validated, and clinically relevant link" |
+| 8 | 129 | D | "the validated SCANAQ provides a clear and actionable pathway" |
+| 9 | 131 | A | "a landmark project designed to prove the fundamental viability" |
+| 10 | 133 | A | "The crucial innovation … was making these parameters learnable" |
+| 11 | 133 | A | "This proxy provides a useful learning signal…" (the central correction) |
+| 12 | 133 | A | HEMM, "allows the model's own recent past activity to influence its current processing" |
+| 13 | 134 | A | Integrated L1 Spike Regularization, audit note added after the paragraph |
+| 14 | 134 | A | "While STAC V1 demonstrated feasibility, its scaling limitations…" |
+| 15 | 136 | A | Deletion of the contrast with V1's L1 regularization |
+| 16 | 137 | D | "captured through the validated SCANAQ assessment" |
+| 17 | 143 | B, references | Tate (2024c), truncated DOI `10.5281/zenodo.140532` |
+| 18 | 143 | B | Tate (2025a), wrong version and DOI shared with Tate (2025b); names all four in-text citations |
+| 19 | 148 | C, Appendix B | Table 9, Section A inverted |
+| 20 | 148 | C | Table 10, Section B sums two constructs |
+| 21 | 149 | C | Table 11, Section C inverted |
+| 22 | 149 | C | Section E rule undefined for ties (43.4% of 3,125 patterns) |
+| 23 | 151 | C | Table 16, Section H empathy total |
+| 24 | 151 | C | Global Notes, reverse-keyed items summed raw |
+
+The groups are ordered in the summary note by the order I would ask the publisher to work them:
+A (mechanism), B (references), C (Appendix B), D (the "validated" wording). D is marked
+explicitly as the one to drop if the request as a whole exceeds what can be applied, so that the
+lowest-value group cannot stall the rest.
 
 ## What reading the typeset chapter changed
 
@@ -72,3 +86,37 @@ was written. The full script and the rendered verification pages are in the sess
 
 Annotation author string: `Ben Kennedy (author) - correction request`. Highlight colour
 (1, 0.85, 0.2) at 45% opacity, chosen to stay legible over the black body text.
+
+## Second pass, same day
+
+The first build of the marked copy carried 15 comments, drawn from the letter of 2026-09-13. A
+systematic re-read of the whole chapter, rather than of the passages the letter already knew
+about, found nine more and one error in the corrigendum itself. The file was rebuilt with 24.
+
+**Six more V1 mechanism locations.** Printed p. 118 says the pipeline was "complete, end-to-end
+differentiable" and that "the maturity of this version was confirmed by a comprehensive
+validation suite of seven distinct test functions"; p. 120 says V1 "fine-tunes a pre-trained
+transformer"; p. 133 says the AdEx parameters were made "learnable" and that the HEMM "allows the
+model's own recent past activity to influence its current processing". None of these survive the
+audit, and none were in the letter.
+
+**Four "validated SCANAQ" sentences**, on pp. 119, 123, 129 and 137. A different class of
+overstatement, recorded in `corrigendum-2026-07.md`. They go in as group D with an explicit note
+that they are the first thing to drop.
+
+**The corrigendum was itself wrong about the blast radius.** Its *What is and isn't invalidated*
+section said the backbone, the projection layers, the HEMM and the head "still trained" and that
+V1's loss figures were "a real measurement of that pipeline". `scripts/verify_v1_downstream.py`
+shows otherwise: the backbone's gradient was exactly zero, the HEMM returned a constant, and two
+unlike inputs produce bit-identical logits. As released, V1 was a constant predictor. That
+section is now corrected, and the marked copy states the wider finding rather than the narrow one.
+
+**What was checked and is fine.** Appendix B Sections D (Risk Propensity) and F (Self-Efficacy)
+were read item by item against their scales and are correct as printed. Every DOI in the
+reference list was checked; four that looked truncated are line-break artefacts of text
+extraction and resolve correctly, leaving the two known defects. The STAC V2 material, including
+the p. 136 statement that the energy figure is theoretical, needs no change.
+
+One cosmetic defect was found and not raised: the Vaswani et al. (2017) entry on p. 143 has a
+mismatched parenthesis and a garbled editor string. It is a typesetting slip with no effect on
+retrieval, and adding it would dilute a request that already asks for a lot.

@@ -55,6 +55,12 @@ verbatim, at its shipped parameters, and reports the spike count:
 python scripts/verify_v1_corrigendum.py
 ```
 
+A second script traces the consequence downstream:
+
+```bash
+python scripts/verify_v1_downstream.py
+```
+
 Observed on the pre-fix code:
 
 | Quantity | Value |
@@ -64,19 +70,41 @@ Observed on the pre-fix code:
 | Current required to fire | 75.0 (observed max: 2.4) |
 | L1 spike penalty `λ·mean\|S\|` | exactly `0.00000000` |
 | Surrogate gradient at operating point | exactly `0.0` |
+| Gradient reaching the GPT-2 backbone | exactly `0.0` |
+| Logit difference between two unlike inputs | exactly `0.0` |
+| Distinct tokens predicted across a whole sequence | **1** |
 
 ## What is and isn't invalidated
+
+> **Revised 2026-09-14.** The first version of this section said the rest of the model "still
+> trained" and that V1's loss figures were "a real measurement of that pipeline". That was
+> wrong, and wrong in the direction that flattered the work. `scripts/verify_v1_downstream.py`
+> traces what the dead spiking layer did to everything behind it. The corrected account follows;
+> the marked copy returned to the publisher on 2026-09-14 carries it.
 
 **Invalidated** — any claim that STAC V1 demonstrated *functioning* surrogate-gradient
 training of a spiking transformer, that gradients flowed through its spiking neurons, that
 its intrinsic firing properties were fine-tuned, or that its L1 term produced sparse spiking
 activity.
 
-**Not invalidated** — the model still trained. The GPT-2 backbone, the projection layers,
-the HEMM memory bias and the `lm_head` are all differentiable and untouched by these
-defects. Any loss or perplexity figure recorded from V1 is a real measurement of that
-pipeline; it simply owes nothing to the spiking mechanism. The architecture, the training
-pipeline and the HEMM design stand as described.
+**Also invalidated, on the second look.** `DLPFCLayer` returns only spike tensors; no residual
+path carries the GPT-2 hidden state past it. With the spike train uniformly zero, three further
+things follow, and none of them were in the first draft of this document:
+
+| Claim | What the released code did |
+| --- | --- |
+| The GPT-2 backbone was fine-tuned | It received a gradient of **exactly zero**. It sat in `AdamW(model.parameters())` and never moved, because the only path from it to the loss runs through a layer whose Jacobian is structurally zero. |
+| The HEMM let recent activity influence current processing | `torch.mean` over a zero spike tensor is zero; the projection of zero is zero; the MLP returned its bias path. The memory bias was **one constant vector**, identical for every position and every input. |
+| V1's loss and perplexity figures measure the hybrid pipeline | `combined = spk_trains + memory_bias` was that same constant, so the head saw identical input for every token of every sequence. Two deliberately unlike inputs give **bit-identical logits**. As released, V1 was a constant predictor: it could learn the unigram distribution of its training data and nothing else. |
+
+Only the HEMM MLP's **bias** terms and the `lm_head` received gradient, and both were fed a
+fixed vector. Any recorded V1 loss curve is a real number, but it measures a unigram model,
+not the architecture the paper describes.
+
+**Not invalidated** — the architecture and the training pipeline stand as *designs*. Nothing
+here says the HEMM or the AdEx layer is a bad idea; the current release runs both with the
+defects fixed. What fails is every statement in the past tense about what the released
+implementation did.
 
 ## Fixes
 
@@ -104,6 +132,39 @@ corrections are confined to statements of mechanism:
 | V1 methodology | "demonstrated the feasibility of creating a high-performance hybrid SNN transformer" | Overstated: covers pipeline construction, not spiking contribution |
 | Spike regularization | Total loss `L = L_CE + λ‖S‖₁` | Second term evaluated to exactly zero |
 | Initial Results | "the integrated L1 spike regularization used during STAC V1 fine-tuning" | No referent |
+| V1 overview (typeset p. 118) | "established a complete, end-to-end differentiable pipeline" | Not differentiable end to end: the spiking layer's Jacobian was structurally zero |
+| V1 overview (typeset p. 118) | "The maturity of this version was confirmed by a comprehensive validation suite of seven distinct test functions" | The suite passed on a silent network; sparsity metrics read their best value there |
+| Background (typeset p. 120) | "a hybrid model that fine-tunes a pre-trained transformer and SNN model" | The backbone received exactly zero gradient |
+| V1 methodology (typeset p. 133) | "The crucial innovation … was making these parameters learnable" | Declared learnable; received no gradient, so never updated |
+| HEMM (typeset p. 133) | "allows the model's own recent past activity to influence its current processing" | Pooled a zero spike train; the memory bias was a constant |
+| V2 pivot (typeset p. 134) | "While STAC V1 demonstrated feasibility" | Feasibility of the spiking mechanism was not demonstrated |
+
+### A second class of overstatement, found 2026-09-14
+
+Sweeping the typeset chapter for claim language rather than for the passages the corrigendum
+already knew about turned up a defect of a different kind. Four sentences describe the SCANAQ,
+or the mapping built on it, as *validated*:
+
+| Typeset page | Text |
+| --- | --- |
+| 119 | "a **validated** psychometric-to-agent mapping methodology" |
+| 123 | "creates a direct, **empirically validated**, and clinically relevant link" |
+| 129 | "the **validated** SCANAQ provides a clear and actionable pathway" |
+| 137 | "captured through the **validated** SCANAQ assessment" |
+
+The chapter is right that the eight source scales are validated instruments, and the sentences
+on pp. 118 and 121 that say so need no change. These four transfer that standing to the
+composite. `PROVENANCE.md` in SCAN-Resources is explicit that it does not hold: the SCANAQ is an
+ad-hoc composite; item subsets were taken, so the source instruments' reliability, norms and
+cutoffs do not apply; Section G is anchored 1–5 against the PSS's native 0–4, shifting every
+total by three points; and seven scored outputs rest on a single item, where reliability is
+undefined. No validation study of the SCANAQ or of the mapping exists.
+
+The same claim appears once in the Springer SEET chapter ("SCANAQ … has been validated through
+current research") and is already listed for the exegesis in `exegesis-corrections.md` item 5.
+It was corrected on scanerad.com on 2026-09-09. The IGI letter of 2026-09-13 did not raise it;
+the marked copy of 2026-09-14 does, as its lowest-priority group, so that it cannot hold up the
+mechanical corrections.
 
 ### Verification log
 
@@ -117,6 +178,9 @@ corrections are confined to statements of mechanism:
 | 2026-09-09 | The PhD exegesis (Drive draft of 2025-12-11) searched for the same claims | Restates the V1 feasibility claim in four passages, reproduces Appendix B (scoring model 1.0.0) in full, and cites SCAN 1.0.0-alpha under the stac 2.0.0.3 DOI (15867066 instead of 14052885). Needs its own amendment: `exegesis-corrections.md`. |
 | 2026-09-09 | Crossref metadata for the chapter DOI fetched (`api.crossref.org/works/10.4018/979-8-3373-5702-7.ch005`) | Published 2025-11-20; references deposited 2026-08-27, 40 entries. Entries 34–36 carry the truncated `10.5281/zenodo.140532` and the duplicated `10.5281/zenodo.15867066`, confirming those two defects in the published record. Entry 21 is Ostrau et al. (2022), which the submitted manuscript lacked: the typeset chapter may carry it. Letter reworded to make the Ostrau item conditional. No `update-to` (erratum) relation exists yet. |
 | 2026-09-14 | The published chapter PDF (40 pages, printed pp. 113–152, Adobe InDesign 20.0) supplied by the proofing desk, read directly and diffed against the manuscript quotations | The Ostrau et al. (2022) entry is present on printed p. 142: that item is withdrawn. Three of the five Part I quotations do not match the printed text, the Abstract's "for sparse, event-driven learning" having been removed in copy-editing. Two further locations need correction (printed pp. 118 and 134) that no manuscript-based draft covered. |
+| 2026-09-14 | `scripts/verify_v1_downstream.py`, the shipped notebook's layer and neuron code traced past the spiking layer | 0 spikes; gradient to the upstream projection exactly 0.0; AdEx parameter gradient exactly 0.0; HEMM MLP weight gradient exactly 0.0 while its bias trains; bit-identical logits for two unlike inputs; one distinct predicted token across a whole sequence. The released V1 was a constant predictor. Exit 0. |
+| 2026-09-14 | The shipped notebook (`stac-v1/stacv1.ipynb` at 7b09d54) read directly to confirm the structure the probe assumes | `DLPFCLayer.forward` returns only `torch.cat(spk_list)`, with no residual path; `DLPFCTransformer.forward` computes `combined_repr = spk_trains + memory_bias.unsqueeze(1)`; HEMM pools with `torch.mean(spike_train, dim=1)`; the optimizer is `AdamW(model.parameters())`, so the backbone was in scope and still received nothing. |
+| 2026-09-14 | The whole typeset chapter swept for assertive claim language (validated, proven, confirmed, successful, ensures, guarantee) rather than for known passages | Four "validated SCANAQ" sentences found (pp. 119, 123, 129, 137), none previously raised with the publisher. Six further V1 mechanism claims found (pp. 118 ×3, 120, 133 ×2). Appendix B Sections D and F checked item by item and are correct as printed. Every other DOI in the reference list checked and resolves; the two defects already known are the only ones. |
 | 2026-09-14 | 16 annotations written into the publisher's PDF with PyMuPDF and each anchor asserted to resolve; pages 113, 133 and 148 rendered at 110 dpi and read back | Every highlight lands on its intended passage; the summary note is visible on p. 113. Returned as `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`; see `corrigendum-marked-copy-2026-09-14.md`. |
 | 2026-09-07 | CI workflow steps run locally on `main` (397c058), Python 3.11: flake8, compileall, import checks, `tests/test_v1.py`, pytest on the offline fixture | 8/8 V1 tests; 63 passed, 3 skipped. |
 | 2026-09-07 | `notebooks/stac_v2_colab.ipynb` §3–§9 executed cell by cell on CPU (no GPU) | §4 spiking off: max logit diff 2.29e-05, top-1 100%. §5 spiking on: energy ratio 0.13× (SNN worse), logits differ 10.1 between T=1 and T=8. §6 both energy scripts exit 0. §7 SmolLM2-135M: diff 1.43e-05, top-1 100%. §8 CPU probe (T=2, seq 32, 50 steps, MLP only): eval perplexity 18,468.56 → 1,137.43. §9 generates. §3 initially showed 1 failed: the coherence test's absolute bar, which unconverted DistilGPT-2 also fails at 30%; made a parity test (see CHANGELOG), after which the suite passes in notebook mode too. |

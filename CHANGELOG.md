@@ -10,6 +10,15 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Fixed
 
+- `docs/corrigendum-2026-07.md` understated the defect it documents. Its *What is and isn't
+  invalidated* section said the GPT-2 backbone, the projection layers, the HEMM and the `lm_head`
+  "still trained" and that V1's loss figures were "a real measurement of that pipeline". They were
+  not. `DLPFCLayer` returns only spike tensors, with no residual path, so a uniformly zero spike
+  train left the head reading one constant vector: two deliberately unlike inputs give bit-identical
+  logits, one token is predicted for a whole sequence, and the backbone's gradient is exactly zero
+  even though it sits in the optimizer. As released, STAC V1 was a constant predictor. The section
+  is rewritten and the new `scripts/verify_v1_downstream.py` reproduces every figure in it.
+
 - `tests/test_multi_turn_coherence` asserted an absolute bar (80% of turns recalled) that
   measured the base model, not the conversion: unconverted DistilGPT-2 recalls 3 of 10 turns
   under the same procedure, so the notebook's §3 cell, which runs the suite against the real
@@ -31,12 +40,20 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Added
 
+- `scripts/verify_v1_downstream.py`: second reproduction, tracing the dead spiking layer's effect
+  on everything behind it. Imports the neuron from `verify_v1_corrigendum.py` so the two cannot
+  drift apart.
 - `docs/corrigendum-marked-copy-2026-09-14.md`: the proofing desk replied on 2026-09-14 asking for
   the corrections as comments inside the digital copy and supplied the published chapter PDF. This
-  file records the 15 comments returned the same day and the three things reading the typeset text
-  changed: the Ostrau et al. (2022) item is withdrawn (production added the entry), three of the
+  file records the 24 comments returned the same day, in four groups, and the three things reading
+  the typeset text changed: the Ostrau et al. (2022) item is withdrawn (production added the entry), three of the
   five Part I quotations were reworded in copy-editing, and two locations need correction that no
-  manuscript-based draft covered.
+  manuscript-based draft covered. A second sweep of the whole chapter for claim language, rather
+  than for the passages the letter already knew about, added six more V1 mechanism locations and a
+  class the corrigendum had never raised: four sentences calling the SCANAQ, or the mapping built
+  on it, *validated*. The source scales are validated instruments; the ad-hoc composite is not,
+  and `PROVENANCE.md` says so. Appendix B Sections D and F were read item by item and are correct
+  as printed.
 - `docs/corrigendum-sent-2026-09-13.md`: the combined corrigendum as it went to the
   publisher on 2026-09-13, with the recipients, the attachment, and the presentational differences
   from the working letter recorded. The proofing desk returned only an automatic reply, which warns
