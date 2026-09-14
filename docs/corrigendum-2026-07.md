@@ -116,6 +116,8 @@ corrections are confined to statements of mechanism:
 | 2026-09-09 | The Springer chapter ("Synthetic Cognitive Augmentation Network", *SEET 2025*, CCIS 2725, DOI 10.1007/978-3-032-08977-9_13) read from the SEET submission manuscript and its Crossref reference deposit | STAC named only as a future component with a pipeline figure; no V1 mechanism claim, no Appendix B. Three Zenodo references (14052759, 14053203, 14052885) resolve via DataCite. One soft overstatement ("SCANAQ … has been validated through current research"). No correction needed. |
 | 2026-09-09 | The PhD exegesis (Drive draft of 2025-12-11) searched for the same claims | Restates the V1 feasibility claim in four passages, reproduces Appendix B (scoring model 1.0.0) in full, and cites SCAN 1.0.0-alpha under the stac 2.0.0.3 DOI (15867066 instead of 14052885). Needs its own amendment: `exegesis-corrections.md`. |
 | 2026-09-09 | Crossref metadata for the chapter DOI fetched (`api.crossref.org/works/10.4018/979-8-3373-5702-7.ch005`) | Published 2025-11-20; references deposited 2026-08-27, 40 entries. Entries 34–36 carry the truncated `10.5281/zenodo.140532` and the duplicated `10.5281/zenodo.15867066`, confirming those two defects in the published record. Entry 21 is Ostrau et al. (2022), which the submitted manuscript lacked: the typeset chapter may carry it. Letter reworded to make the Ostrau item conditional. No `update-to` (erratum) relation exists yet. |
+| 2026-09-14 | The published chapter PDF (40 pages, printed pp. 113–152, Adobe InDesign 20.0) supplied by the proofing desk, read directly and diffed against the manuscript quotations | The Ostrau et al. (2022) entry is present on printed p. 142: that item is withdrawn. Three of the five Part I quotations do not match the printed text, the Abstract's "for sparse, event-driven learning" having been removed in copy-editing. Two further locations need correction (printed pp. 118 and 134) that no manuscript-based draft covered. |
+| 2026-09-14 | 16 annotations written into the publisher's PDF with PyMuPDF and each anchor asserted to resolve; pages 113, 133 and 148 rendered at 110 dpi and read back | Every highlight lands on its intended passage; the summary note is visible on p. 113. Returned as `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`; see `corrigendum-marked-copy-2026-09-14.md`. |
 | 2026-09-07 | CI workflow steps run locally on `main` (397c058), Python 3.11: flake8, compileall, import checks, `tests/test_v1.py`, pytest on the offline fixture | 8/8 V1 tests; 63 passed, 3 skipped. |
 | 2026-09-07 | `notebooks/stac_v2_colab.ipynb` §3–§9 executed cell by cell on CPU (no GPU) | §4 spiking off: max logit diff 2.29e-05, top-1 100%. §5 spiking on: energy ratio 0.13× (SNN worse), logits differ 10.1 between T=1 and T=8. §6 both energy scripts exit 0. §7 SmolLM2-135M: diff 1.43e-05, top-1 100%. §8 CPU probe (T=2, seq 32, 50 steps, MLP only): eval perplexity 18,468.56 → 1,137.43. §9 generates. §3 initially showed 1 failed: the coherence test's absolute bar, which unconverted DistilGPT-2 also fails at 30%; made a parity test (see CHANGELOG), after which the suite passes in notebook mode too. |
 
@@ -134,10 +136,17 @@ day which carries a warning worth recording:
 > journalproofing@igi-global.com) without a corresponding note in the proofing system will not be
 > seen by the typesetter in time for the changes to be implemented.
 
-That inbox is described in the same reply as "loosely monitored". The request may therefore need a
-second route: the volume editor directly (already copied), `cust@igi-global.com` (already copied),
-or a note in IGI's proofing system against this chapter. See step 8 of
-[`corrigendum-runbook.md`](corrigendum-runbook.md).
+That inbox is described in the same reply as "loosely monitored". The warning turned out not to
+apply: a member of the proofing team replied on 2026-09-14, asking for the corrections as comments
+inside the digital copy rather than described in prose, and supplying the published chapter PDF.
+They also set the scope: revisions are guaranteed only for the digital copy and only if accepted,
+and anything exceeding those limits goes to the editorial managers to consider a correction
+erratum.
+
+**Marked copy returned 2026-09-14**, the same day, with 15 numbered comments anchored on the
+passages they concern and a summary note on printed p. 113. Reading the typeset text withdrew one
+item, corrected three quotations, and added two locations the letter never covered:
+[`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md).
 
 ### Citation accuracy
 

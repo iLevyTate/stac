@@ -31,6 +31,12 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Added
 
+- `docs/corrigendum-marked-copy-2026-09-14.md`: the proofing desk replied on 2026-09-14 asking for
+  the corrections as comments inside the digital copy and supplied the published chapter PDF. This
+  file records the 15 comments returned the same day and the three things reading the typeset text
+  changed: the Ostrau et al. (2022) item is withdrawn (production added the entry), three of the
+  five Part I quotations were reworded in copy-editing, and two locations need correction that no
+  manuscript-based draft covered.
 - `docs/corrigendum-sent-2026-09-13.md`: the combined corrigendum as it went to the
   publisher on 2026-09-13, with the recipients, the attachment, and the presentational differences
   from the working letter recorded. The proofing desk returned only an automatic reply, which warns
