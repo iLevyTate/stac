@@ -12,13 +12,13 @@ set expectations on scope:
 > manuscript.
 
 The marked copy prepared on 2026-09-14 is `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`:
-the publisher's own PDF with 25 annotations added using PyMuPDF, each anchored on the text it
+the publisher's own PDF with 26 annotations added using PyMuPDF, each anchored on the text it
 concerns. It is not committed here; the source is the publisher's copyrighted typeset file.
 
 ## What the marked copy contains
 
 One `Text` (sticky note) annotation on printed p. 113 summarising the request and naming the
-four groups, plus 24 `Highlight` annotations carrying numbered comments. Every comment gives
+four groups, plus 25 `Highlight` annotations carrying numbered comments. Every comment gives
 the published wording, the replacement wording, and the reason.
 
 | # | Printed page | Group | Location |
@@ -47,6 +47,7 @@ the published wording, the replacement wording, and the reason.
 | 22 | 149 | C | Section E rule undefined for ties (43.4% of 3,125 patterns) |
 | 23 | 151 | C | Table 16, Section H empathy total |
 | 24 | 151 | C | Global Notes, reverse-keyed items summed raw |
+| 25 | 144 | C, Appendix A | Table 1, the eight Section A items replaced with the instrument 2.0.0 wording |
 
 The groups are ordered in the summary note by the order I would ask the publisher to work them:
 A (mechanism), B (references), C (Appendix B), D (the "validated" wording). D is marked
@@ -120,3 +121,16 @@ the p. 136 statement that the energy figure is theoretical, needs no change.
 One cosmetic defect was found and not raised: the Vaswani et al. (2017) entry on p. 143 has a
 mismatched parenthesis and a garbled editor string. It is a typesetting slip with no effect on
 retrieval, and adding it would dilute a request that already asks for a lot.
+
+## Third addition, 2026-09-16
+
+Comment 25 replaces the eight Section A items of Appendix A with the original wording of
+instrument 2.0.0. On 2026-09-16 the reuse terms of all eight SCANAQ source scales were checked
+against each owner's own statement (`PROVENANCE.md` in SCAN-Resources, section *Reuse terms,
+verified 2026-09-16*). Six are free with citation, one (GDMS) has no author statement, and one is
+not free: the BRIEF-A, published by PAR Inc., whose position is that it "will not grant permission
+to include an entire test or scale in any publication". The printed Section A items track BRIEF-A
+wording closely, which is why instrument 2.0.0 reworded them. Replacing the items in the digital
+copy removes the exposure without a permissions request; the comment gives the reason plainly and
+without the word "licensing". Sections B to H of Appendix A are unchanged. Only this 25-comment
+build was sent to the publisher.

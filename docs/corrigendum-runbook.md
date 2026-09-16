@@ -113,7 +113,8 @@ step are held in reserve and are not needed unless the marked copy goes unanswer
 ### 9. Marked copy returned — done 2026-09-14 (you: send it)
 
 `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf` was built from the publisher's own file
-and delivered as a session file. Reply to the same thread with it attached. Two points worth
+and delivered as a session file. Final build 2026-09-16: 25 comments, the last replacing the
+Appendix A Section A items (see the marked-copy record and SCAN-Resources `PROVENANCE.md`). Reply to the same thread with it attached. Two points worth
 making in the covering message: the Group 1 and Group 3 comments are small edits well inside the
 digital-copy limits, while Group 2 replaces Appendix B wholesale and is the part most likely to
 need the editorial managers, so an erratum for that group alone is an acceptable outcome. The

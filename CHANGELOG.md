@@ -45,7 +45,8 @@ corrigendum offers the chapter's editor as a verification path.
   drift apart.
 - `docs/corrigendum-marked-copy-2026-09-14.md`: the proofing desk replied on 2026-09-14 asking for
   the corrections as comments inside the digital copy and supplied the published chapter PDF. This
-  file records the 24 comments returned the same day, in four groups, and the three things reading
+  file records the 25 comments returned (the last, added 2026-09-16, replaces the Appendix A
+  Section A items with instrument 2.0.0 wording after the source scales' reuse terms were verified), in four groups, and the three things reading
   the typeset text changed: the Ostrau et al. (2022) item is withdrawn (production added the entry), three of the
   five Part I quotations were reworded in copy-editing, and two locations need correction that no
   manuscript-based draft covered. A second sweep of the whole chapter for claim language, rather
