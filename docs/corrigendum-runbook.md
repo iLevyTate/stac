@@ -176,5 +176,7 @@ reader following the published Appendix B assigns inverted profiles.
 - The ecosystem site (scanerad.com) carried a "3-4× less energy" claim, an estimated
   performance chart with no source, a "validated" label on SCANAQ, and paper cards that
   omitted the Springer chapter and pointed two cards at the same IGI chapter. Corrected on
-  2026-09-09 on branch `claude/eloquent-faraday-vdkqhl` of iLevyTate/ScanEcosystem; merge to
-  `main` to deploy.
+  2026-09-09 and deployed through ScanEcosystem PR #9. The tone reframing that followed is
+  [ScanEcosystem PR #10](https://github.com/iLevyTate/ScanEcosystem/pull/10), opened
+  2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
+  commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).

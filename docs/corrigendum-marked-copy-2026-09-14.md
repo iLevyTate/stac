@@ -11,7 +11,7 @@ set expectations on scope:
 > the editorial managers for further review in order to grant a correction erratum to your
 > manuscript.
 
-The marked copy returned on 2026-09-14 is `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`:
+The marked copy prepared on 2026-09-14 is `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf`:
 the publisher's own PDF with 25 annotations added using PyMuPDF, each anchored on the text it
 concerns. It is not committed here; the source is the publisher's copyrighted typeset file.
 
