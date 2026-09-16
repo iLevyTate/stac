@@ -7,7 +7,7 @@
 
 STAC (Spiking Transformer Augmenting Cognition) is a research framework that explores two complementary approaches to spiking neural network (SNN) language modeling:
 
-- **STAC V1**: A complete end-to-end training pipeline built around learnable Adaptive Exponential (AdEx) neurons. See `stac_v1/`.
+- **STAC V1**: A complete end-to-end training pipeline built around learnable Adaptive Exponential (AdEx) neurons. See `stac_v1/`. In every release before 4.0.0 the spiking layer was inert (no spikes, zero gradient, the backbone untrained), so the published account of V1 describes intended rather than observed behaviour; see [`docs/corrigendum-2026-07.md`](docs/corrigendum-2026-07.md) and run `scripts/verify_v1_corrigendum.py`.
 - **STAC V2**: An experimental conversion framework that transforms pretrained transformer language models (DistilGPT-2, SmolLM2-1.7B-Instruct) into SNNs. The conversion is numerically faithful with spiking *off*; with spiking *on*, a frozen converted model collapses and needs training to recover — and the projected energy of the current design is worse than the dense ANN. See [`docs/findings-summary.md`](docs/findings-summary.md).
 
 > **Important**: This repository currently runs *software-level* SNN simulations only. No
@@ -109,7 +109,7 @@ python tests/test_conversational_snn.py --model_name distilgpt2 --test_all --tim
 
 ### STAC V1
 
-**Completed (research prototype)**
+**Completed (research prototype, working since 4.0.0; inert in every earlier release, see the corrigendum)**
 - End-to-end training pipeline with learnable AdEx neurons.
 - Hyperdimensional Memory Module (HEMM) integration, with causal pooling.
 - Surrogate-gradient training. `--dataset wikitext2` loads WikiText-2 when the optional
