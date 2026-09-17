@@ -134,6 +134,26 @@ Checked 2026-09-09: 14052759 (SCANUE 1.0.0-alpha), 14053203 (SCAN-Resources 1.0.
 14052885 (SCAN 1.0.0-alpha), 14510407 (scanue-v22), 14545341 (stac 1.0.2.1-alpha) and
 15867066 (stac 2.0.0.3) all resolve through DataCite to the records named here.
 
+### 8. Appendix A and the reference list, found 2026-09-17
+
+**Appendix A.** The June 2026 PDF reproduces the SCANAQ in full (pp. 25–27). Its Section A items
+are the instrument 1.0.0 wording that tracks the BRIEF-A (PAR Inc.), and Sections B, C, E, F and G
+reproduce ERQ, BIS-11, GDMS, GSE and PSS items verbatim. See SCAN-Resources `PROVENANCE.md`, *Reuse
+terms, verified 2026-09-16*: only Section A is a real exposure. **Amend** by replacing the eight
+Section A statements with the instrument 2.1.0 wording, as the marked copy asks IGI to do for the
+chapter.
+
+**Reference list.** Full audit in `reference-audit-2026-09-17.md`. Three entries repeat defects from
+the chapters and must be replaced: Li et al. (2021) *Cerebral Cortex* (no such paper; delete and
+re-cite the VMPFC claim to Bechara et al. 2000, already in the list); Fang et al. (2021) SpikingJelly
+*Frontiers* (the work is Fang et al. 2023, *Science Advances 9*(40), eadi1480, 10.1126/sciadv.adi1480);
+Schmidgall, Smith & Patel (2024) arXiv 2403.12345 (the work is Schmidgall, Ziaei, Achterberg, Kirsch,
+Hajiseyedrazi & Eshraghian 2024, *APL Machine Learning 2*(2), 021501, 10.1063/5.0186054). Two
+placeholders are stale: "Kennedy, Mohammad & Wyandt (2023a) … [Pending final release information]"
+should become the Springer entry (SEET 2025, CCIS 2725, pp. 179–188, 10.1007/978-3-032-08977-9_13),
+and "Kennedy (2025a) … [Manuscript in preparation]" duplicates the correct Kennedy (2026) entry and
+should be deleted, with in-text "Kennedy, 2025a" changed to "Kennedy, 2026".
+
 ## Unaffected
 
 The exegesis already hedges the energy claim ("projected energy savings that await rigorous

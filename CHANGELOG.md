@@ -40,6 +40,11 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Added
 
+- `docs/reference-audit-2026-09-17.md`: every DOI and arXiv identifier in the reference lists of
+  the three published chapters and the exegesis resolved, and every claimed title searched. Sixteen
+  defective entries across the three chapters, nine of them with no such work in existence; seven in
+  the chapter the correction request already covers, eight in the *Beyond Intelligence* chapter, one
+  in the Springer chapter. The corrigendum had only ever checked the Zenodo entries.
 - `scripts/verify_v1_downstream.py`: second reproduction, tracing the dead spiking layer's effect
   on everything behind it. Imports the neuron from `verify_v1_corrigendum.py` so the two cannot
   drift apart.
