@@ -31,8 +31,8 @@ typesetting but retrievable.
 
 ## Beyond Intelligence (IGI ch007, DOI 10.4018/979-8-3373-4252-8.ch007)
 
-Checked from the June 2025 pre-production PDF; Crossref's deposited reference list (62 entries,
-deposited by IGI) carries the same identifiers, so the published chapter has them. Eight defective.
+Confirmed on the published PDF (printed pp. 257–286, supplied 2026-09-17); all eight entries appear
+as below on printed pp. 281–284. Eight defective.
 
 | # | Entry | Identifier resolves to | Classification | Cited |
 |---|---|---|---|---|
@@ -78,3 +78,15 @@ Each publisher needs a correction. For IGI ch005 the seven entries can go into t
 group B, which becomes nine comments instead of two; the fix in every case is a replacement reference
 entry, and the digital copy is what the publisher has said it can change. For IGI ch007 and for
 Springer this is the first correction request, and it should be sent as its own letter.
+
+## Marked copy for ch007, built 2026-09-17
+
+`Beyond-Intelligence-CORRECTIONS-MARKED.pdf`: a summary note on printed p. 257 and eight highlight
+comments on pp. 281–284, one per entry. Five ask for a replacement entry (Grossberg's book;
+Leng et al. 2021, 10.1016/j.jmsy.2021.05.011; Liu et al. 2022, 10.3389/fpsyg.2022.892387; Megatron-LM
+as arXiv:1909.08053; Schmidgall et al. 2024, 10.1063/5.0186054), two ask for deletion with a body
+change (Farrell & Yu → Siemon et al. 2022, 10.3390/su14073832, on p. 274; Roumeliotis & Tselikas
+citation removed from the sentence on p. 266), one asks for deletion with no other change
+(Gudmundsson & Lönner, uncited). "(Leng et al., 2022)" changes year on pp. 259, 272, 275 and 276.
+Every replacement DOI was resolved and its author list taken from Crossref before the file was built.
+Not yet sent.
