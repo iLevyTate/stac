@@ -4,6 +4,8 @@
 
 STAC V1 represents the **original research approach** - a complete end-to-end training pipeline for spiking transformers. This version established the foundational concepts that were later adapted for the conversion-based approach in STAC V2.
 
+> **Correction to the published record.** In every release up to and including `3.0.0-beta`, and in the notebook the book chapter cites, the AdEx layer emitted no spikes and its surrogate gradient underflowed to exactly zero. Nothing upstream of it trained, the HEMM returned a constant, and the released model was a constant predictor. The 4.0.0 fixes (`CurrentDrive`, surrogate width tied to `delta_T`) are what make the description below true. Details and reproduction: [`../docs/corrigendum-2026-07.md`](../docs/corrigendum-2026-07.md).
+
 ## Key Differences: V1 vs V2
 
 | Aspect | STAC V1 | STAC V2 |

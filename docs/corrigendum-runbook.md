@@ -3,7 +3,7 @@
 Companion to [`corrigendum-combined.md`](corrigendum-combined.md) (the letter) and
 [`corrigendum-2026-07.md`](corrigendum-2026-07.md) (the technical account). This file is the
 operational checklist: what is done, what remains, who does it, and the exact click or command.
-Updated 2026-09-09.
+Updated 2026-09-14 (second revision, after the proofing desk's reply).
 
 ## Done
 
@@ -13,14 +13,14 @@ Updated 2026-09-09.
 | Zenodo 4.0.0 deposit | https://doi.org/10.5281/zenodo.22554655; concept DOI 10.5281/zenodo.14545340 resolves to it |
 | DOI metadata corrected | `CITATION.cff` and README badge carry the concept DOI; 18023657 listed as the 3.0.0-beta version DOI; `.zenodo.json` declares `isVersionOf` the concept DOI |
 | Two drafts merged into one letter | `docs/corrigendum-combined.md`; the two source drafts carry a superseded notice |
-| Reference-list section reconciled | Tate (2025a) → 4.0.0 DOI; Tate (2025b) keeps 15867066 (confirmed to be the 2.0.0.3 record); Tate (2024c) → 14053202; Ostrau et al. (2022) added conditionally (Crossref shows it in the published list; see step 4). The 4.0.0 deposit's author of record is "Kennedy, Ben" (DataCite), not "Tate, L."; the cover note now says so and offers the editor the Kennedy, B. (2026) form. |
+| Reference-list section reconciled | Tate (2025a) → 4.0.0 DOI; Tate (2025b) keeps 15867066 (confirmed to be the 2.0.0.3 record); Tate (2024c) → 14053202; Ostrau et al. (2022) withdrawn on 2026-09-14: the typeset chapter carries the entry on printed p. 142. The 4.0.0 deposit's author of record is "Kennedy, Ben" (DataCite), not "Tate, L."; the cover note now says so and offers the editor the Kennedy, B. (2026) form. |
 | Signature | Ben Kennedy, Capitol Technology University, matching the chapter byline |
 | Reproduction | `python scripts/verify_v1_corrigendum.py` on `main` reproduces every figure the letter quotes (log in `corrigendum-2026-07.md`) |
 | CI | green on `main` at fabab59 (run 54); the same steps re-run locally on 397c058: 63 passed, 3 skipped |
 | Colab notebook | §3–§9 run on CPU 2026-09-07; two defects it surfaced are fixed (see step 5) |
 | Quoted passages | all five Part I passages and the Appendix B tables match the submitted manuscript verbatim |
 | Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md` (`main`, ae7c7d0) with headless Chromium on 2026-09-09, 8 pages, metadata guard 0 hits, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record). It is not attached to the draft; attach it at send. |
-| Gmail draft | "Correction request — chapter DOI 10.4018/979-8-3373-5702-7.ch005", in the gmail.com account, body identical to the letter, no placeholders left. Re-saved 2026-09-09 as plain text: the earlier save had wrapped every URL in a `google.com/url?q=` redirect, which would have gone out to the publisher. |
+| Send copy | The Gmail draft could not be used: Gmail rewrites every URL in a stored draft into a `google.com/url?q=` redirect, and did so again after a clean re-save. The draft was retitled "DO NOT SEND FROM GMAIL" and the letter was sent instead from a plain-text copy pasted into a new message from the university account. That copy is recorded as `corrigendum-sent-2026-09-13.md`. |
 | Branch housekeeping | Not done: origin still carries six branches besides `main` and the current working branch. `claude/stac-doi-metadata-wbiwdd` held one stranded commit (17ab08d, the full Tate (2025a) form in the two superseded drafts), cherry-picked on 2026-09-09; `claude/stac-doi-metadata-yw5zvv` is an older superset that `main` has overtaken; `docs/readme-rewrite` is PR #25, closed unmerged on 2026-09-09; the other three are fully merged. All six can be deleted. |
 
 ## Remaining, in dependency order
@@ -49,29 +49,22 @@ university mailbox: the proofing desk sent the typeset-proof notice for this boo
 2025-11-14, the submission system sent the chapter approval on 2025-10-24 with Dr. Kabir in
 copy and `cust@` as the support address. Nothing to change.
 
-### 4. Typeset check (you) — one item now depends on it
+### 4. Typeset check — done 2026-09-14
 
-Crossref's record of the chapter (deposited by IGI on 2026-08-27, 40 references) lists
-Ostrau et al. (2022) as reference 21, alphabetically placed, while the truncated `140532`
-DOI and the duplicated `15867066` are still there. Production may have added the missing
-entry. The letter and the Gmail draft were reworded on 2026-09-09 so the Ostrau item is
-conditional ("if it was added in production please disregard that one item") and the
-letter is correct either way. Reading the typeset chapter's reference list would let you
-drop the item outright before sending.
+Closed by the publisher itself. The proofing desk supplied the published chapter PDF on
+2026-09-14 when it asked for the corrections as in-document comments, so the typeset text was
+read directly rather than inferred from Crossref. Three findings, all in
+[`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md):
 
-The quotations were diffed against the submitted manuscript, not the typeset chapter. The
-typeset proof is on IGI's platform at
-`https://www.igi-global.com/submission/proofing/document/?did=152536` (login required;
-Chrome, Firefox, or Edge). Open it at the five Part I locations and Appendix B and confirm
-nothing was changed in copy-editing, or save it as PDF and send it to me to diff.
+1. Ostrau et al. (2022) is in the published reference list on printed p. 142. Item withdrawn.
+2. Three of the five Part I quotations were reworded in copy-editing. The Abstract's strongest
+   claim, that the hybrid was fine-tuned "for sparse, event-driven learning", was already removed
+   in production; the printed sentence needs one verb changed.
+3. Two locations need correction that no manuscript-based draft covered, on printed pp. 118 and
+   134.
 
-The one load-bearing item here is closed. The Appendix B tables had been read from interleaved
-text extraction, which left the 6–12 Impulsivity row's label inferred from row order. On
-2026-09-09 the manuscript's Table B3 was extracted cell by cell and the page rendered and read
-as an image: row 5B is "High Motor Impulsivity, Low Non-Planning Impulsivity", 6–12,
-"Acts impulsively; limited advance planning." Correction ② stands on a direct read. What
-remains for the typeset PDF is house-style copyedits, which would change wording in the
-"Published" quotations but not the substance of any correction.
+The Appendix B corrections and the two reference-list defects were all confirmed present in the
+typeset chapter, unchanged from the manuscript.
 
 ### 5. Colab — done 2026-09-07 (CPU)
 
@@ -83,18 +76,54 @@ warning that RoPE is dropped directly above a result proving it is applied. A GP
 the notebook's default settings is optional; the CPU probe already shows the perplexity
 recovery (18,468 → 1,137 in 50 steps).
 
-### 6. Send (you)
+### 6. Send - done 2026-09-13
 
-Send from `bkennedy1@captechu.edu`, the address IGI has on file. The draft is in the gmail.com
-account, so either forward it to yourself and send from the university account, or copy the body.
-Attach `Appendix-B-Scoring-v2.0.pdf` (the rendered file from step 4 of the pre-send table; if it
-needs re-rendering, print `Forms/Appendix-B-Scoring-v2.0.md` from SCAN-Resources `main` to PDF and
-run the metadata guard from that repository's `validate.yml` on the result before attaching).
+Sent from `bkennedy1@captechu.edu` to `bookproofing@igi-global.com`, copying
+`ZianShah.Kabir@uts.edu.au` and `cust@igi-global.com`, subject "Correction request - chapter DOI
+10.4018/979-8-3373-5702-7.ch005", with `Appendix-B-Scoring-v2.0.pdf` attached. The attachment was
+re-rendered in Times New Roman (Tinos, the metric-compatible substitute available on the build
+host) with all dashes removed; 7 pages, identifying-metadata guard clean. The body as sent is
+`corrigendum-sent-2026-09-13.md`.
 
-### 7. Record it (me)
+### 7. Record it - done 2026-09-14
 
-Add the send date, recipients, and any ticket number to the *Submission* section of
-`corrigendum-2026-07.md`, and a line to `CHANGELOG.md`.
+The send is recorded in the *Submission* section of `corrigendum-2026-07.md`, in row 6 of the
+pre-send table in `corrigendum-combined.md`, and in `CHANGELOG.md`.
+
+### 8. Human reply — received 2026-09-14
+
+The auto-reply's warning about the loosely monitored inbox did not bite. A member of the proofing
+team replied the next day asking for the corrections as comments in the digital copy rather than
+as prose, and attaching the published chapter PDF. Two things in that reply set expectations:
+
+> We can only guarantee the revisions for the digital copy of the publication if the revisions are
+> accepted. If the revisions exceed our limitations, they may be forwarded to the editorial
+> managers for further review in order to grant a correction erratum to your manuscript.
+
+So the print edition is out of reach, the digital corrections are not automatic, and an erratum is
+the escalation path rather than the default. The escalation routes from the earlier draft of this
+step are held in reserve and are not needed unless the marked copy goes unanswered:
+
+1. Reply directly to Dr. Kabir, since a volume editor can route a post-publication correction
+   internally.
+2. Add a note against this chapter in IGI's proofing system:
+   `https://www.igi-global.com/submission/proofing/document/?did=152536` (login required).
+3. IGI Global's editorial contact form at `www.igi-global.com/contact/`, citing the chapter DOI.
+
+### 9. Marked copy returned — done 2026-09-14 (you: send it)
+
+`Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf` was built from the publisher's own file
+and delivered as a session file. Final build 2026-09-16: 25 comments, the last replacing the
+Appendix A Section A items (see the marked-copy record and SCAN-Resources `PROVENANCE.md`). Reply to the same thread with it attached. Two points worth
+making in the covering message: the Group 1 and Group 3 comments are small edits well inside the
+digital-copy limits, while Group 2 replaces Appendix B wholesale and is the part most likely to
+need the editorial managers, so an erratum for that group alone is an acceptable outcome. The
+corrected Appendix B PDF was already attached to the 2026-09-13 message and does not need
+resending unless they ask.
+
+If the answer is that some corrections exceed the limits, the fallback is the erratum route they
+named. The one thing not to accept quietly is Group 2 going uncorrected with no erratum, since a
+reader following the published Appendix B assigns inverted profiles.
 
 ## Copies in circulation (tell them once the letter goes)
 
@@ -148,5 +177,7 @@ Add the send date, recipients, and any ticket number to the *Submission* section
 - The ecosystem site (scanerad.com) carried a "3-4× less energy" claim, an estimated
   performance chart with no source, a "validated" label on SCANAQ, and paper cards that
   omitted the Springer chapter and pointed two cards at the same IGI chapter. Corrected on
-  2026-09-09 on branch `claude/eloquent-faraday-vdkqhl` of iLevyTate/ScanEcosystem; merge to
-  `main` to deploy.
+  2026-09-09 and deployed through ScanEcosystem PR #9. The tone reframing that followed is
+  [ScanEcosystem PR #10](https://github.com/iLevyTate/ScanEcosystem/pull/10), opened
+  2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
+  commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).
