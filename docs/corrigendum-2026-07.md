@@ -212,6 +212,12 @@ passages they concern and a summary note on printed p. 113. Reading the typeset 
 item, corrected three quotations, and added two locations the letter never covered:
 [`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md).
 
+**Marked copies sent 2026-09-21.** The ch005 reply (32 comments, with the re-rendered Appendix B 2.0)
+went on the original thread; the ch007 request (8 comments) went as a new message with the
+co-authors in copy. Both to the same proofing desk on the same day, by design. Record of contents:
+[`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md) and
+[`reference-audit-2026-09-17.md`](reference-audit-2026-09-17.md).
+
 ### Citation accuracy
 
 The paper cites the V1 implementation as *iLevyTate/stac* **Version 2.0.0.3**. That tag

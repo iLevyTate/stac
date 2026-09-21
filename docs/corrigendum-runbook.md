@@ -110,10 +110,12 @@ step are held in reserve and are not needed unless the marked copy goes unanswer
    `https://www.igi-global.com/submission/proofing/document/?did=152536` (login required).
 3. IGI Global's editorial contact form at `www.igi-global.com/contact/`, citing the chapter DOI.
 
-### 9. Marked copy returned — done 2026-09-14 (you: send it)
+### 9. Marked copy returned — sent 2026-09-21
 
 `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf` was built from the publisher's own file
-and delivered as a session file. Final build 2026-09-20: 32 comments, after SCAN-Resources 2.1.0 (DOI 10.5281/zenodo.22865240)
+and delivered as a session file. **Sent 2026-09-21** as a reply on the original thread, with the
+Appendix B 2.0 PDF re-rendered from the 2.1.0 tree, to `bookproofing@igi-global.com`, copying
+Dr. Kabir and `cust@igi-global.com`. Final build 2026-09-20: 32 comments, after SCAN-Resources 2.1.0 (DOI 10.5281/zenodo.22865240)
 was released; group B carries the seven reference defects from `reference-audit-2026-09-17.md`
 and comment 26 the 2.1.0 Section A wording (see the marked-copy record). Reply to the same thread with it attached. Two points worth
 making in the covering message: the Group 1 and Group 3 comments are small edits well inside the
@@ -183,8 +185,9 @@ reader following the published Appendix B assigns inverted profiles.
   2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
   commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).
 
-### 10. Beyond Intelligence (ch007) and Springer (you: send)
+### 10. Beyond Intelligence (ch007) — sent 2026-09-21; Springer — next
 
-`Beyond-Intelligence-CORRECTIONS-MARKED.pdf` (eight reference comments, built 2026-09-17) and its
-covering email are ready; it goes as a new message with Atif Mohammad and Matthew Wyandt in copy.
+`Beyond-Intelligence-CORRECTIONS-MARKED.pdf` (eight reference comments, built 2026-09-17) **went
+2026-09-21** as a new message to `bookproofing@igi-global.com`, copying `cust@igi-global.com`,
+Atif Mohammad and Matthew Wyandt. Both IGI requests are now with the same desk on the same day.
 The Springer erratum for the one "Spikeformers" entry is drafted after the two IGI emails are out.
