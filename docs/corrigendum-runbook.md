@@ -185,6 +185,29 @@ reader following the published Appendix B assigns inverted profiles.
   2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
   commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).
 
+### 11. IGI refused at the proofing desk — 2026-09-21 to 23
+
+Three replies from the Proofing Coordinator (Ms. DeannaJo Zombro) on the ch005 thread, covering
+both chapters:
+
+- 2026-09-21: both books "have been completed and in circulation for over three months, and we can
+  no longer access the files for editing. Also, revising the bibliographical references after
+  publication is not acceptable for reasons of ethical integrity."
+- 2026-09-22: files are "temporarily archived for three months in the event contributors request
+  additional revisions with probable cause. After three months, we no longer have access to editing
+  the files."
+- 2026-09-23: "there is no way to make any revisions to any files. Once the book has been published
+  for three months, the files are locked for editing on all accounts."
+
+Two things are wrong with this as a final answer. The proofing desk can only edit files; a
+correction notice is a separate publication and does not need the files unlocked. And the ethics
+claim is inverted: IGI signs its mail as a COPE member, and COPE's guidance is that errors in the
+published record are corrected by a published notice, not left standing. The desk's own first
+reply named the route: "forwarded to the editorial managers for further review in order to grant a
+correction erratum". That is the next step, as a formal request to the editorial level rather than
+the proofing level, with the volume editors and co-authors copied. Ben told Atif Mohammad and
+Matthew Wyandt on 2026-09-25 that this is the plan; both acknowledged on 2026-09-25 and 26.
+
 ### 10. Beyond Intelligence (ch007) — sent 2026-09-21; Springer — next
 
 `Beyond-Intelligence-CORRECTIONS-MARKED.pdf` (eight reference comments, built 2026-09-17) **went
