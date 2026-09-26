@@ -3,6 +3,8 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14545340.svg)](https://doi.org/10.5281/zenodo.14545340)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<img width="2560" height="1280" alt="GitHub social preview, 1280×640@2x" src="https://github.com/user-attachments/assets/eeb9e092-adaa-4a10-bee9-a9868eead531" />
+
 ## Overview
 
 STAC (Spiking Transformer Augmenting Cognition) is a research framework that explores two complementary approaches to spiking neural network (SNN) language modeling:
