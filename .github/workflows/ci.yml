@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.10", "3.11"]
 
     steps:
     - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
         # own it may pull a build compiled against a different torch, causing
         # "operator torchvision::nms does not exist" when transformers imports it.
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        pip install "transformers>=4.30,<4.48" "numpy<2.0" packaging pytest spikingjelly tqdm
+        pip install "transformers>=5.10,<6" "numpy<2.0" packaging pytest spikingjelly requests tqdm
       continue-on-error: false
 
     - name: Install optional dependencies

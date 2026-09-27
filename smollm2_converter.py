@@ -85,6 +85,75 @@ Quantizer = get_quantizer()
 
 
 # Spike-compatible layer normalization
+# ---------------------------------------------------------------------------
+# transformers attention protocol compatibility
+#
+# transformers 4.48 (Llama family) and 4.53 (GPT-2) changed the contract between a
+# decoder block and its attention module: the block now unpacks exactly
+# ``(attn_output, attn_weights)`` and the KV cache is a ``Cache`` object, passed as
+# ``past_key_values`` and updated in place. Before that, Llama blocks unpacked
+# ``(output, weights, present)`` and GPT-2 blocks indexed ``(output, present[, weights])``
+# built from legacy ``(k, v)`` tuples. The replacement modules below emit whichever
+# layout their host uses, detected from the signature of the module they replace.
+# ---------------------------------------------------------------------------
+
+
+def _legacy_protocol_by_version() -> bool:
+    """Fallback protocol guess when no host attention module can be inspected."""
+    try:
+        import transformers
+        from packaging.version import Version
+
+        return Version(transformers.__version__) < Version("4.48.0")
+    except Exception:  # pragma: no cover - packaging/transformers unavailable
+        return True
+
+
+def _attention_uses_legacy_protocol(attn_module) -> bool:
+    """Whether a host attention module follows the pre-4.48 (Llama) / pre-4.53 (GPT-2) layout."""
+    try:
+        params = inspect.signature(attn_module.forward).parameters
+    except (TypeError, ValueError):
+        return _legacy_protocol_by_version()
+    if "layer_past" in params:
+        # GPT-2 before its cache refactor: (output, present[, weights]) with (k, v) tuples.
+        return True
+    if "past_key_values" in params:
+        # New interface: Cache object in, (output, weights) out.
+        return False
+    # Llama 4.45-4.47 still took use_cache/output_attentions explicitly and returned a
+    # 3-tuple; from 4.48 those moved into **kwargs and the block unpacks two values.
+    return "use_cache" in params
+
+
+def _find_host_attention(model):
+    """First attention module of a not-yet-converted transformers model, or None."""
+    for module in model.modules():
+        if isinstance(module, (SpikeAttention, LoihiCausalContextMixer)):
+            continue
+        if type(module).__name__.endswith("Attention"):
+            return module
+    return None
+
+
+def _apply_attention_protocol(model, legacy: bool) -> None:
+    """Record the host protocol on the model and on every replacement attention module.
+
+    Also numbers replacement modules that carry no ``layer_idx``: with a Cache object the
+    per-layer index is mandatory (``DynamicCache.update(k, v, layer_idx)``), whereas the
+    legacy GPT-2 path never needed one. Modules are visited in registration order, which
+    is block order for every supported architecture.
+    """
+    model._stac_legacy_attention_protocol = bool(legacy)
+    next_layer_idx = 0
+    for module in model.modules():
+        if isinstance(module, (SpikeAttention, LoihiCausalContextMixer)):
+            module.legacy_protocol = bool(legacy)
+            if getattr(module, "layer_idx", None) is None:
+                module.layer_idx = next_layer_idx
+            next_layer_idx += 1
+
+
 class SpikeLayerNorm(nn.Module):
     """Spiking-compatible layer normalization."""
     def __init__(self, normalized_shape, eps=1e-5):
@@ -187,6 +256,11 @@ class SpikeAttention(nn.Module):
         # Controls the return-tuple layout expected by the host transformer block.
         # "gpt2": (output, present[, attn]); "llama": (output, attn, present).
         self.return_mode = "gpt2"
+        # Whether the host block expects that legacy layout (transformers < 4.48 for Llama,
+        # < 4.53 for GPT-2). Newer blocks unpack exactly (output, attn_weights) and own the
+        # Cache object, so `present` is never returned. Set by
+        # replace_attention_with_spikeattention from the replaced module's signature.
+        self.legacy_protocol = True
         # Required to update a transformers Cache object (Llama-style decoders index the
         # cache per layer). Set when replacing an attention module that carries one.
         self.layer_idx = layer_idx
@@ -314,7 +388,12 @@ class SpikeAttention(nn.Module):
         # (k, v) tuple. Reading only `layer_past` meant the cache branch never ran on
         # Llama/SmolLM2, and returning a bare tuple made LlamaModel crash later with
         # "'tuple' object has no attribute 'to_legacy_cache'".
-        cache_obj = past_key_value if past_key_value is not None else layer_past
+        cache_obj = past_key_value
+        if cache_obj is None:
+            # transformers >= 4.53 (GPT-2) / 4.56 (Llama) pass the Cache as `past_key_values`.
+            cache_obj = kwargs.get("past_key_values")
+        if cache_obj is None:
+            cache_obj = layer_past
         present = None
 
         if cache_obj is not None and hasattr(cache_obj, "update"):
@@ -378,6 +457,14 @@ class SpikeAttention(nn.Module):
             # max 0, so that test re-inverted it into (1 - (-3.4e38)) * -1e4 = -inf on
             # every masked position. Whole rows became -inf and softmax returned NaN, so
             # any batch containing padding produced NaN logits.
+            if attention_mask.dtype == torch.bool:
+                # Boolean masks (True = attend) come from the sdpa mask builders in newer
+                # transformers; turn them into the additive form handled below.
+                attention_mask = torch.where(
+                    attention_mask,
+                    torch.zeros((), dtype=attn_weights.dtype, device=attention_mask.device),
+                    torch.full((), -10000.0, dtype=attn_weights.dtype, device=attention_mask.device),
+                )
             is_keep_mask = bool(attention_mask.min() >= 0)
 
             if attention_mask.dim() == 2:
@@ -431,6 +518,10 @@ class SpikeAttention(nn.Module):
         # Always return a tuple so downstream transformer blocks can unpack consistently.
         # A bare tensor return broke callers that do `attn_output = attn_outputs[0]`.
         attn_weights_out = attn_probs if output_attentions else None
+        if not getattr(self, "legacy_protocol", True):
+            # transformers >= 4.48 (Llama) / >= 4.53 (GPT-2): the block unpacks exactly
+            # (attn_output, attn_weights); the Cache object was updated in place above.
+            return output, attn_weights_out
         if getattr(self, "return_mode", "gpt2") == "llama":
             # LlamaDecoderLayer unpacks (hidden_states, self_attn_weights, present_key_value).
             return output, attn_weights_out, present
@@ -462,6 +553,8 @@ class LoihiCausalContextMixer(nn.Module):
         self._logit_alpha = nn.Parameter(torch.tensor(2.0))
 
         self.mix = nn.Linear(hidden_size * 2, hidden_size, bias=True)
+        # See SpikeAttention.legacy_protocol; set by the replacement helpers.
+        self.legacy_protocol = True
 
     def forward(
         self,
@@ -495,6 +588,9 @@ class LoihiCausalContextMixer(nn.Module):
         # LlamaDecoderLayer instead unpacks exactly three values
         # (hidden_states, self_attn_weights, present_key_value), so a 2-tuple raised
         # "ValueError: not enough values to unpack (expected 3, got 2)" on SmolLM2.
+        if not getattr(self, "legacy_protocol", True):
+            # Newer transformers blocks unpack exactly (attn_output, attn_weights).
+            return output, None
         if getattr(self, "return_mode", "gpt2") == "llama":
             return output, None, present
         if output_attentions:
@@ -957,6 +1053,52 @@ class TemporalSpikeProcessor(nn.Module):
             trimmed.append((key[..., -keep:, :], value[..., -keep:, :]))
         return trimmed
 
+    def _expects_cache_object(self) -> bool:
+        """Whether the inner model wants a transformers Cache rather than (k, v) tuples."""
+        legacy = getattr(self.snn_model, "_stac_legacy_attention_protocol", None)
+        if legacy is None:
+            legacy = _legacy_protocol_by_version()
+        return not legacy
+
+    @staticmethod
+    def _tuples_to_cache(past_key_values):
+        """Build a DynamicCache from legacy per-layer (key, value) tuples."""
+        from transformers.cache_utils import DynamicCache
+
+        cache = DynamicCache()
+        for layer_idx, layer in enumerate(past_key_values):
+            cache.update(layer[0], layer[1], layer_idx)
+        return cache
+
+    @staticmethod
+    def _cache_to_tuples(cache):
+        """
+        Normalise whatever the model returned as past_key_values to a list of (k, v) tuples.
+
+        The processor keeps the legacy layout internally (trimming and per-conversation
+        batching slice it directly); transformers >= 4.48 hands back a Cache object.
+        """
+        if cache is None or isinstance(cache, (list, tuple)):
+            return cache
+        layers = getattr(cache, "layers", None)
+        if layers is not None:
+            out = []
+            for layer in layers:
+                keys = getattr(layer, "keys", None)
+                values = getattr(layer, "values", None)
+                if keys is None or values is None:
+                    break
+                out.append((keys, values))
+            return out
+        key_cache = getattr(cache, "key_cache", None)
+        value_cache = getattr(cache, "value_cache", None)
+        if key_cache is not None and value_cache is not None:
+            return [(k, v) for k, v in zip(key_cache, value_cache)]
+        to_legacy = getattr(cache, "to_legacy_cache", None)
+        if callable(to_legacy):
+            return [tuple(layer) for layer in to_legacy()]
+        return cache
+
     def _create_position_ids(self, input_shape, past_length=0):
         """
         HF-style position ID creation with cache support.
@@ -1232,7 +1374,13 @@ class TemporalSpikeProcessor(nn.Module):
             # (k, v) tuples SpikeAttention emits and crashes on `.to_legacy_cache()`.
             model_kwargs["use_cache"] = bool(use_cache)
             if use_cache and past_key_values is not None:
-                model_kwargs["past_key_values"] = past_key_values
+                # Newer transformers models only accept a Cache object; build a fresh one
+                # per timestep so every pass of the T-loop starts from the same history.
+                model_kwargs["past_key_values"] = (
+                    self._tuples_to_cache(past_key_values)
+                    if self._expects_cache_object()
+                    else past_key_values
+                )
 
             # Forward pass through the model
             outputs = self.snn_model(model_input_ids, **model_kwargs)
@@ -1242,12 +1390,12 @@ class TemporalSpikeProcessor(nn.Module):
                 # Standard HF model output
                 current_logits = outputs.logits
                 if hasattr(outputs, "past_key_values") and outputs.past_key_values is not None:
-                    present_key_values = outputs.past_key_values
+                    present_key_values = self._cache_to_tuples(outputs.past_key_values)
             else:
                 # Tuple output (logits, past_key_values)
                 if isinstance(outputs, tuple) and len(outputs) >= 2:
                     current_logits = outputs[0]
-                    present_key_values = outputs[1]
+                    present_key_values = self._cache_to_tuples(outputs[1])
                 else:
                     # Direct logits output
                     current_logits = outputs
@@ -1686,6 +1834,16 @@ def replace_attention_with_spikeattention(model, spiking=False):
         f"Replacing attention blocks with SpikeAttention (spiking={'on' if spiking else 'off'})"
     )
     attn_count = 0
+    # Detect the block <-> attention protocol before any module is replaced.
+    host_attn = _find_host_attention(model)
+    legacy_protocol = (
+        _attention_uses_legacy_protocol(host_attn) if host_attn is not None
+        else _legacy_protocol_by_version()
+    )
+    logger.info(
+        "Host attention protocol: "
+        + ("legacy (output, present) tuples" if legacy_protocol else "Cache object, (output, weights)")
+    )
     
     # Detect model architecture type for appropriate attention handling
     model_type = ""
@@ -1767,6 +1925,7 @@ def replace_attention_with_spikeattention(model, spiking=False):
                 f"Could not find self_attn modules in Llama-style model '{model_type}'."
             )
         logger.info(f"Replaced {attn_count} attention blocks with SpikeAttention")
+        _apply_attention_protocol(model, legacy_protocol)
         return model
 
     # For GPT and similar decoder-only architectures
@@ -2040,6 +2199,7 @@ def replace_attention_with_spikeattention(model, spiking=False):
                                  "Please implement specific handling for this architecture.")
     
     logger.info(f"Replaced {attn_count} attention blocks with SpikeAttention")
+    _apply_attention_protocol(model, legacy_protocol)
     return model
 
 
@@ -2051,6 +2211,11 @@ def replace_attention_with_loihi_mixer(model):
     if hasattr(model, "config") and hasattr(model.config, "model_type"):
         model_type = str(model.config.model_type).lower()
     attn_count = 0
+    host_attn = _find_host_attention(model)
+    legacy_protocol = (
+        _attention_uses_legacy_protocol(host_attn) if host_attn is not None
+        else _legacy_protocol_by_version()
+    )
 
     # Only replace the attention module itself, matched by its exact child name.
     # Matching any name *containing* "attn"/"attention" also matched children such as
@@ -2106,6 +2271,7 @@ def replace_attention_with_loihi_mixer(model):
         )
 
     logger.info(f"Replaced {attn_count} attention blocks with LoihiCausalContextMixer")
+    _apply_attention_protocol(model, legacy_protocol)
     return model
 
 def simplified_conversion(model, timesteps=32, skip_gelu_replacement=False, real_spiking=False):

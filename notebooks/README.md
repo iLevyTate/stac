@@ -9,7 +9,7 @@ run top to bottom.
 
 What it walks through:
 
-1. Install the pinned dependencies (`transformers < 4.48`, `numpy < 2.0`).
+1. Install the pinned dependencies (`transformers >= 5.10`, `numpy < 2.0`).
 2. Run the test suite, including the liveness checks that guard the fixed spiking pathway.
 3. Convert DistilGPT-2 with spiking **off** — verify it reproduces the original model.
 4. Convert with spiking **on** — see real spikes, the (unfavourable) energy projection, and
