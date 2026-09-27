@@ -134,3 +134,16 @@ wording closely, which is why instrument 2.0.0 reworded them. Replacing the item
 copy removes the exposure without a permissions request; the comment gives the reason plainly and
 without the word "licensing". Sections B to H of Appendix A are unchanged. Only this 25-comment
 build was sent to the publisher.
+
+## Fourth build, 2026-09-20: 32 comments
+
+Built after SCAN-Resources 2.1.0 was released (version DOI 10.5281/zenodo.22865240). Three changes
+from the 25-comment build. Group B grows from two comments to nine: the seven defective entries
+from `reference-audit-2026-09-17.md` are comments 19 to 25, each with a replacement entry whose
+authors, volume, issue and pages were taken from Crossref, or a deletion with the one body
+citation re-pointed (Li et al. 2021 → Bechara et al. 2005, already in the list; Ling et al. 2022
+→ sentence trimmed). Comment 17 now points readers at the 2.1.0 DOI. The Appendix A comment,
+now 26, carries the 2.1.0 wording and the 2.1.0 DOI. Groups C's comments renumber 26 to 32.
+The Appendix B attachment was re-rendered from the 2.1.0 tree (7 pages, Tinos, no dashes, metadata
+guard clean) because its Section A content pointers restate the new wording. This is the build
+sent.

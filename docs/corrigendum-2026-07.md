@@ -212,6 +212,21 @@ passages they concern and a summary note on printed p. 113. Reading the typeset 
 item, corrected three quotations, and added two locations the letter never covered:
 [`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md).
 
+**Marked copies sent 2026-09-21.** The ch005 reply (32 comments, with the re-rendered Appendix B 2.0)
+went on the original thread; the ch007 request (8 comments) went as a new message with the
+co-authors in copy. Both to the same proofing desk on the same day, by design. Record of contents:
+[`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md) and
+[`reference-audit-2026-09-17.md`](reference-audit-2026-09-17.md).
+
+**Appeal and Springer request sent 2026-09-27.** After the IGI proofing desk refused both marked
+copies (2026-09-21 to 23), the request went to IGI's Executive Editorial Board under its Book
+Editorial Policy, asking for a published correction notice per chapter; the ch005 and ch007 volume
+editors and the ch007 co-authors were copied. The same day, the Springer request (fabricated
+ref. 9, wrong volume and year on ref. 4, one clause in §2.2) went to the SEET 2025 production
+contact with the co-authors copied. Drafts: [`igi-editorial-appeal-draft.md`](igi-editorial-appeal-draft.md),
+[`springer-erratum-draft.md`](springer-erratum-draft.md). Nothing further is outstanding on the
+author's side; the record now waits on the publishers.
+
 ### Citation accuracy
 
 The paper cites the V1 implementation as *iLevyTate/stac* **Version 2.0.0.3**. That tag

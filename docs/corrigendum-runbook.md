@@ -110,11 +110,14 @@ step are held in reserve and are not needed unless the marked copy goes unanswer
    `https://www.igi-global.com/submission/proofing/document/?did=152536` (login required).
 3. IGI Global's editorial contact form at `www.igi-global.com/contact/`, citing the chapter DOI.
 
-### 9. Marked copy returned — done 2026-09-14 (you: send it)
+### 9. Marked copy returned — sent 2026-09-21
 
 `Aligned-Minds-Efficient-Machines-CORRECTIONS-MARKED.pdf` was built from the publisher's own file
-and delivered as a session file. Final build 2026-09-16: 25 comments, the last replacing the
-Appendix A Section A items (see the marked-copy record and SCAN-Resources `PROVENANCE.md`). Reply to the same thread with it attached. Two points worth
+and delivered as a session file. **Sent 2026-09-21** as a reply on the original thread, with the
+Appendix B 2.0 PDF re-rendered from the 2.1.0 tree, to `bookproofing@igi-global.com`, copying
+Dr. Kabir and `cust@igi-global.com`. Final build 2026-09-20: 32 comments, after SCAN-Resources 2.1.0 (DOI 10.5281/zenodo.22865240)
+was released; group B carries the seven reference defects from `reference-audit-2026-09-17.md`
+and comment 26 the 2.1.0 Section A wording (see the marked-copy record). Reply to the same thread with it attached. Two points worth
 making in the covering message: the Group 1 and Group 3 comments are small edits well inside the
 digital-copy limits, while Group 2 replaces Appendix B wholesale and is the part most likely to
 need the editorial managers, so an erratum for that group alone is an acceptable outcome. The
@@ -181,3 +184,51 @@ reader following the published Appendix B assigns inverted profiles.
   [ScanEcosystem PR #10](https://github.com/iLevyTate/ScanEcosystem/pull/10), opened
   2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
   commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).
+
+### 12. Co-author agreement, and the two remaining letters — 2026-09-26
+
+Ben put both remaining requests to Atif Mohammad and Matthew Wyandt on 2026-09-25 (subject
+"Reference corrections on our IGI and Springer SCAN chapters: need your sign-off"). Both agreed on
+2026-09-25 and 26. The two letters are drafted and were placed in Gmail on 2026-09-26 for transfer
+to the university account:
+
+- Springer: `springer-erratum-draft.md`, three items, to the Straive production contact with the
+  co-authors in copy.
+- IGI: `igi-editorial-appeal-draft.md`, one letter for both chapters, to the support address and the
+  proofing desk with the ch005 volume editor, both ch007 volume editors, and the co-authors in
+  copy, both marked PDFs and the Appendix B 2.0 PDF attached.
+
+**Both sent 2026-09-27** from the university account, the Springer letter as a reply on the
+2025-11-11 galley thread and the IGI appeal as a new message on the ch005 thread. That closes
+every outbound item: three chapters, two publishers, four letters. Editor and co-author addresses
+are kept in the mail threads, not in this file.
+
+### 11. IGI refused at the proofing desk — 2026-09-21 to 23
+
+Three replies from the Proofing Coordinator (Ms. DeannaJo Zombro) on the ch005 thread, covering
+both chapters:
+
+- 2026-09-21: both books "have been completed and in circulation for over three months, and we can
+  no longer access the files for editing. Also, revising the bibliographical references after
+  publication is not acceptable for reasons of ethical integrity."
+- 2026-09-22: files are "temporarily archived for three months in the event contributors request
+  additional revisions with probable cause. After three months, we no longer have access to editing
+  the files."
+- 2026-09-23: "there is no way to make any revisions to any files. Once the book has been published
+  for three months, the files are locked for editing on all accounts."
+
+Two things are wrong with this as a final answer. The proofing desk can only edit files; a
+correction notice is a separate publication and does not need the files unlocked. And the ethics
+claim is inverted: IGI signs its mail as a COPE member, and COPE's guidance is that errors in the
+published record are corrected by a published notice, not left standing. The desk's own first
+reply named the route: "forwarded to the editorial managers for further review in order to grant a
+correction erratum". That is the next step, as a formal request to the editorial level rather than
+the proofing level, with the volume editors and co-authors copied. Ben told Atif Mohammad and
+Matthew Wyandt on 2026-09-25 that this is the plan; both acknowledged on 2026-09-25 and 26.
+
+### 10. Beyond Intelligence (ch007) — sent 2026-09-21; Springer — next
+
+`Beyond-Intelligence-CORRECTIONS-MARKED.pdf` (eight reference comments, built 2026-09-17) **went
+2026-09-21** as a new message to `bookproofing@igi-global.com`, copying `cust@igi-global.com`,
+Atif Mohammad and Matthew Wyandt. Both IGI requests are now with the same desk on the same day.
+The Springer erratum for the one "Spikeformers" entry is drafted after the two IGI emails are out.
