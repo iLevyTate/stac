@@ -1,4 +1,4 @@
-# IGI Global: appeal to the Executive Editorial Board, drafted 2026-09-26 (not yet sent)
+# IGI Global: appeal to the Executive Editorial Board, drafted 2026-09-26 (sent 2026-09-27)
 
 **Why.** The Proofing Coordinator refused both marked copies three times (2026-09-21, 22, 23):
 the files are locked after three months, and "revising the bibliographical references after

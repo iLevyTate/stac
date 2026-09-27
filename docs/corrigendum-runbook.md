@@ -198,8 +198,10 @@ to the university account:
   proofing desk with the ch005 volume editor, both ch007 volume editors, and the co-authors in
   copy, both marked PDFs and the Appendix B 2.0 PDF attached.
 
-Neither had been sent when this was written. Record the send dates here when they go. Editor and
-co-author addresses are kept in the mail threads, not in this file.
+**Both sent 2026-09-27** from the university account, the Springer letter as a reply on the
+2025-11-11 galley thread and the IGI appeal as a new message on the ch005 thread. That closes
+every outbound item: three chapters, two publishers, four letters. Editor and co-author addresses
+are kept in the mail threads, not in this file.
 
 ### 11. IGI refused at the proofing desk — 2026-09-21 to 23
 

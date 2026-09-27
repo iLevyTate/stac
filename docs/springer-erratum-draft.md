@@ -1,4 +1,4 @@
-# Springer erratum request, drafted 2026-09-21, revised the same day (not yet sent)
+# Springer erratum request, drafted 2026-09-21, revised the same day (sent 2026-09-27)
 
 **Chapter:** Kennedy, B. J., Mohammad, A. F., & Wyandt, M. (2026). Synthetic Cognitive Augmentation
 Network. In *SEET 2025*, CCIS 2725, pp. 179–188. DOI 10.1007/978-3-032-08977-9_13.
