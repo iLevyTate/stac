@@ -185,6 +185,22 @@ reader following the published Appendix B assigns inverted profiles.
   2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
   commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).
 
+### 12. Co-author agreement, and the two remaining letters — 2026-09-26
+
+Ben put both remaining requests to Atif Mohammad and Matthew Wyandt on 2026-09-25 (subject
+"Reference corrections on our IGI and Springer SCAN chapters: need your sign-off"). Both agreed on
+2026-09-25 and 26. The two letters are drafted and were placed in Gmail on 2026-09-26 for transfer
+to the university account:
+
+- Springer: `springer-erratum-draft.md`, three items, to the Straive production contact with the
+  co-authors in copy.
+- IGI: `igi-editorial-appeal-draft.md`, one letter for both chapters, to the support address and the
+  proofing desk with the ch005 volume editor, both ch007 volume editors, and the co-authors in
+  copy, both marked PDFs and the Appendix B 2.0 PDF attached.
+
+Neither had been sent when this was written. Record the send dates here when they go. Editor and
+co-author addresses are kept in the mail threads, not in this file.
+
 ### 11. IGI refused at the proofing desk — 2026-09-21 to 23
 
 Three replies from the Proofing Coordinator (Ms. DeannaJo Zombro) on the ch005 thread, covering
