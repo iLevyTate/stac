@@ -37,6 +37,18 @@ corrigendum offers the chapter's editor as a verification path.
 - Colab notebook: §3 explains what the coherence parity check measures, and §9 says the rebuild
   must match the `--timesteps` and `--components` used in §8 (the CPU probe settings the §8
   comment suggests otherwise load with missing keys and generate a repeated token).
+- transformers is no longer capped below 4.48. `SpikeAttention`, `LoihiCausalContextMixer` and
+  `TemporalSpikeProcessor` detect the attention protocol of the installed transformers
+  (`_attention_uses_legacy_protocol`): from 4.48 (Llama) and 4.53 (GPT-2) a decoder block unpacks
+  exactly `(output, weights)` and passes the KV cache as a `Cache` object updated in place, where
+  older releases unpacked three values (Llama) or indexed `(output, present)` tuples (GPT-2). The
+  processor keeps its legacy `(k, v)` tuples internally and converts at the model boundary, so
+  trimming and per-conversation batching are unchanged. `requirements.txt` now asks for
+  transformers 5.10+, the first release with no published advisory (the 4.47 pin carried 27,
+  among them deserialization and remote-code-execution fixes), with peft 0.21+ (older peft imports
+  the removed `HybridCache`), accelerate 1.x, bitsandbytes 0.45+ and an explicit `requests`
+  (spikingjelly imports it undeclared and transformers 5 stopped pulling it in). transformers 5
+  needs Python 3.10, so CI no longer runs 3.9.
 
 ### Added
 

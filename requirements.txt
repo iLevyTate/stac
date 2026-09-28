@@ -2,9 +2,15 @@
 # torch 2.2–2.x are supported. Pick a build matching your Python/CUDA runtime
 # (see docs/hardware_requirements.md for CPU/CUDA install commands).
 torch>=2.2.0,<3.0.0
-# transformers is capped below 4.48: 4.48 changed internal attention return
-# contracts that the SpikeAttention replacement in this repo relies on.
-transformers>=4.30.0,<4.48.0
+# transformers 5.10 is the first release clearing every published advisory on the
+# 4.x line (deserialization RCEs fixed in 4.48, ReDoS fixes in 4.52/4.53, the RCE and
+# LightGlue code-execution fixes in 5.3/5.5, and the save_pretrained path traversal
+# fixed in 5.10). SpikeAttention and TemporalSpikeProcessor detect the attention
+# protocol of the installed transformers (legacy (k, v) tuples below 4.48 for Llama
+# and 4.53 for GPT-2, Cache objects and (output, weights) returns after), so the code
+# still runs on older releases, but they carry those advisories. transformers 5
+# requires Python 3.10+.
+transformers>=5.10.0,<6.0.0
 numpy>=1.24.0,<2.0.0
 packaging>=21.0
 
@@ -13,14 +19,19 @@ spikingjelly>=0.0.0.0.14
 # Note: Use pre-release for latest features: pip install spikingjelly[cuda] -U --pre
 
 # Efficient Training and Quantization (optional; used by the quantized conversion paths)
-bitsandbytes>=0.39.0,<0.45.0
-accelerate>=0.20.0,<0.35.0
+bitsandbytes>=0.45.0,<1.0.0
+accelerate>=1.0.0,<2.0.0
 
 # Parameter-efficient finetuning (LoRA adapters for distillation)
-peft>=0.12.0,<0.17.0
+# peft below 0.17 imports HybridCache, which transformers 5 removed.
+peft>=0.21.0,<1.0.0
 
 # Progress Monitoring
 tqdm>=4.65.0
+
+# spikingjelly's ann2snn module imports requests without declaring it, and transformers 5
+# no longer pulls it in. 2.33 fixes the temp-file reuse advisory GHSA-gc5v-m9x4-r6x2.
+requests>=2.33.0
 
 # Testing
 pytest>=7.0.0
@@ -42,4 +53,4 @@ pytest>=7.0.0
 # flake8>=6.0.0
 # mypy>=1.0.0
 
-# Recommended Python: 3.9–3.11 (CI is tested on 3.9, 3.10, 3.11).
+# Recommended Python: 3.10–3.11 (transformers 5 needs 3.10+; CI is tested on 3.10, 3.11).

@@ -28,6 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
+from tokenizers import Tokenizer, decoders, pre_tokenizers, processors
+from tokenizers.models import BPE
 from transformers import (
     GPT2Config,
     GPT2LMHeadModel,
@@ -35,7 +37,28 @@ from transformers import (
     LlamaConfig,
     LlamaForCausalLM,
 )
-import transformers.models.gpt2.tokenization_gpt2 as gpt2_tokenization
+
+
+def bytes_to_unicode() -> dict[int, str]:
+    """GPT-2's reversible byte -> printable-unicode map, copied from transformers.
+
+    transformers exported it as ``models.gpt2.tokenization_gpt2.bytes_to_unicode`` up to
+    4.x and moved it to ``convert_slow_tokenizer`` in 5.0; keeping a local copy makes
+    the fixture builder independent of where the next release puts it.
+    """
+    bs = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("\u00a1"), ord("\u00ac") + 1))
+        + list(range(ord("\u00ae"), ord("\u00ff") + 1))
+    )
+    cs = bs[:]
+    n = 0
+    for b in range(2**8):
+        if b not in bs:
+            bs.append(b)
+            cs.append(2**8 + n)
+            n += 1
+    return dict(zip(bs, (chr(c) for c in cs)))
 
 
 # Every byte is its own token plus one special token. Small, deterministic, and needs no
@@ -82,16 +105,22 @@ def build_byte_tokenizer(out_dir: Path) -> GPT2TokenizerFast:
     """Write a self-contained byte-level BPE tokenizer with no merges."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    byte_to_unicode = gpt2_tokenization.bytes_to_unicode()
+    byte_to_unicode = bytes_to_unicode()
     vocab = {byte_to_unicode[i]: i for i in range(256)}
     vocab[EOS_TOKEN] = 256
 
-    (out_dir / "vocab.json").write_text(json.dumps(vocab), encoding="utf-8")
-    (out_dir / "merges.txt").write_text("#version: 0.2\n", encoding="utf-8")
+    # Build the fast tokenizer from an in-memory `tokenizers` model rather than from
+    # vocab.json / merges.txt: transformers 5 no longer converts those files when a fast
+    # GPT-2 tokenizer is constructed from them (the result had an empty vocabulary), and
+    # this form is what both 4.x and 5.x load back from the saved tokenizer.json.
+    backend = Tokenizer(BPE(vocab=vocab, merges=[], unk_token=EOS_TOKEN))
+    backend.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    backend.decoder = decoders.ByteLevel()
+    backend.post_processor = processors.ByteLevel(trim_offsets=False)
+    backend.add_special_tokens([EOS_TOKEN])
 
     tokenizer = GPT2TokenizerFast(
-        vocab_file=str(out_dir / "vocab.json"),
-        merges_file=str(out_dir / "merges.txt"),
+        tokenizer_object=backend,
         unk_token=EOS_TOKEN,
         bos_token=EOS_TOKEN,
         eos_token=EOS_TOKEN,
