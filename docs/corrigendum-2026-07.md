@@ -218,14 +218,30 @@ co-authors in copy. Both to the same proofing desk on the same day, by design. R
 [`corrigendum-marked-copy-2026-09-14.md`](corrigendum-marked-copy-2026-09-14.md) and
 [`reference-audit-2026-09-17.md`](reference-audit-2026-09-17.md).
 
-**Appeal and Springer request sent 2026-09-27.** After the IGI proofing desk refused both marked
+**Appeal and Springer request sent 2026-09-26.** After the IGI proofing desk refused both marked
 copies (2026-09-21 to 23), the request went to IGI's Executive Editorial Board under its Book
 Editorial Policy, asking for a published correction notice per chapter; the ch005 and ch007 volume
-editors and the ch007 co-authors were copied. The same day, the Springer request (fabricated
+editors and the ch007 co-authors were copied. The same evening, the Springer request (fabricated
 ref. 9, wrong volume and year on ref. 4, one clause in §2.2) went to the SEET 2025 production
 contact with the co-authors copied. Drafts: [`igi-editorial-appeal-draft.md`](igi-editorial-appeal-draft.md),
-[`springer-erratum-draft.md`](springer-erratum-draft.md). Nothing further is outstanding on the
-author's side; the record now waits on the publishers.
+[`springer-erratum-draft.md`](springer-erratum-draft.md).
+
+**IGI accepted, 2026-10-01, confirmed 2026-10-06.** The Editorial Management Team "reviewed your
+concerns and will allow the revisions to be implemented", with an estimate of eight weeks to
+retrieve the archived files. On 2026-10-06 it confirmed that both chapters are in hand, that "the
+DOI for each chapter will not change, and a correction notice will be on the website and in the
+chapters", and that the after-publication work runs through the proofing desk. The digital copies
+will be revised from the two marked PDFs and the Appendix B 2.0 PDF; print copies keep the
+original text and the notice is the record for them. Expected late November 2026. The author's
+remaining task is to verify the revised files and the notice text against the 32 and 8 items
+when IGI sends them.
+
+**Springer, 2026-09-28 to 10-06.** The production vendor refused the request two days after it
+was sent ("no belated corrections are permitted after publication"). The request was re-sent on
+2026-10-01 through the SEET 2025 volume editor, who forwarded it to Springer's Production Manager;
+on 2026-10-06 the editor reported that "Springer will send you updated PDF for proofread next
+week". Whether the outcome is a Correction notice or a replaced chapter file is not yet stated and
+will be recorded when the PDF arrives. Runbook steps 13 and 14 carry the detail.
 
 ### Citation accuracy
 

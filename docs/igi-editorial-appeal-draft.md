@@ -1,4 +1,4 @@
-# IGI Global: appeal to the Executive Editorial Board, drafted 2026-09-26 (sent 2026-09-27)
+# IGI Global: appeal to the Executive Editorial Board, drafted 2026-09-26 (sent 2026-09-26)
 
 **Why.** The Proofing Coordinator refused both marked copies three times (2026-09-21, 22, 23):
 the files are locked after three months, and "revising the bibliographical references after
@@ -95,3 +95,12 @@ process is exhausted), and a self-published corrigendum on Zenodo under the stac
 concept DOIs, which the repositories and scanerad.com would link. The second should happen
 regardless of the outcome, since it is the only correction a reader following the chapter's
 software citation will actually find.
+
+## Outcome
+
+Accepted. On 2026-10-01 the Editorial Management Team wrote that it had "reviewed your concerns
+and will allow the revisions to be implemented", with eight weeks estimated to retrieve the
+archived files. On 2026-10-06 it confirmed both chapters are with the after-publication team,
+that "the DOI for each chapter will not change, and a correction notice will be on the website and
+in the chapters", and that correspondence continues through the proofing desk. The fallback
+section above was not needed. Runbook step 13.
