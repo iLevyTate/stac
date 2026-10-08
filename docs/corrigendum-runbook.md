@@ -21,6 +21,8 @@ Updated 2026-09-14 (second revision, after the proofing desk's reply).
 | Quoted passages | all five Part I passages and the Appendix B tables match the submitted manuscript verbatim |
 | Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md` (`main`, ae7c7d0) with headless Chromium on 2026-09-09, 8 pages, metadata guard 0 hits, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record). It is not attached to the draft; attach it at send. |
 | Send copy | The Gmail draft could not be used: Gmail rewrites every URL in a stored draft into a `google.com/url?q=` redirect, and did so again after a clean re-save. The draft was retitled "DO NOT SEND FROM GMAIL" and the letter was sent instead from a plain-text copy pasted into a new message from the university account. That copy is recorded as `corrigendum-sent-2026-09-13.md`. |
+| IGI outcome | Accepted 2026-10-01; confirmed 2026-10-06: both chapters, DOIs unchanged, correction notice on the website and in the chapters, about eight weeks. Step 13. |
+| Springer outcome | Vendor refused 2026-09-28; rerouted through the SEET 2025 volume editor 2026-10-01; Springer to send an updated PDF for proofread the week of 2026-10-12. Step 14. |
 | Branch housekeeping | Not done: origin still carries six branches besides `main` and the current working branch. `claude/stac-doi-metadata-wbiwdd` held one stranded commit (17ab08d, the full Tate (2025a) form in the two superseded drafts), cherry-picked on 2026-09-09; `claude/stac-doi-metadata-yw5zvv` is an older superset that `main` has overtaken; `docs/readme-rewrite` is PR #25, closed unmerged on 2026-09-09; the other three are fully merged. All six can be deleted. |
 
 ## Remaining, in dependency order
@@ -176,14 +178,71 @@ reader following the published Appendix B assigns inverted profiles.
   own, one of which (the SCAN 1.0.0-alpha entry pointing at the stac 2.0.0.3 DOI) does not
   occur in any chapter. The passages and the proposed wording are in
   [`exegesis-corrections.md`](exegesis-corrections.md). Route: the university's dissertation
-  office. This is independent of the IGI send and does not block it.
+  office. Dr. Wyandt's university address auto-replied on 2026-09-26 that he is no longer
+  employed at Capitol and that dissertation inquiries go to the Director of Graduate School
+  Operations, so the addendum goes to that office, not to his. He remains reachable at his
+  personal address for the co-author side. This is independent of the IGI send and does not
+  block it; with IGI's acceptance (step 13) the addendum can cite the forthcoming correction
+  notices.
 - The ecosystem site (scanerad.com) carried a "3-4× less energy" claim, an estimated
   performance chart with no source, a "validated" label on SCANAQ, and paper cards that
   omitted the Springer chapter and pointed two cards at the same IGI chapter. Corrected on
   2026-09-09 and deployed through ScanEcosystem PR #9. The tone reframing that followed is
-  [ScanEcosystem PR #10](https://github.com/iLevyTate/ScanEcosystem/pull/10), opened
-  2026-09-16; after it merges, `main` still has to be merged into `gh-pages`. The record
-  commits in this repository are [stac PR #27](https://github.com/iLevyTate/stac/pull/27).
+  [ScanEcosystem PR #10](https://github.com/iLevyTate/ScanEcosystem/pull/10), merged
+  2026-09-20 and deployed to `gh-pages` the same day (7a7fd8a); the live site was checked
+  after deploy. The record commits in this repository are
+  [stac PR #27](https://github.com/iLevyTate/stac/pull/27) and
+  [stac PR #29](https://github.com/iLevyTate/stac/pull/29).
+
+### 14. Springer: refused at the vendor, rerouted through the volume editor — 2026-09-28 to 10-06
+
+Straive's production supervisor answered the 2026-09-26 request on 2026-09-28: "your correction
+request could not be processed because your paper has already been published. All corrections must
+be provided and finalized during the revision stage of publication. No belated corrections are
+permitted after publication." That is the proof desk's answer to a proof question. A Correction
+notice is a separate publication and is not something a production vendor issues.
+
+Ben wrote on 2026-10-01 to the SEET 2025 volume editor, Dr. Muhammad Abdul Basit Ur Rahim
+(California State University, Long Beach), and the conference address, restating the three items
+and asking for the request to reach the CCIS publishing editor. The co-authors were copied. The
+editor forwarded it to Springer's Production Manager on 2026-10-02 and wrote on 2026-10-06:
+"Springer will send you updated PDF for proofread next week." Ben answered the same day that he
+will return it within 48 hours of receipt.
+
+What this is and is not. An "updated PDF for proofread" means Springer is preparing a revised
+chapter file. It does not yet say whether the version of record will be replaced in place or a
+Correction notice published alongside it. When the PDF arrives: check all three items against it
+(ref. 9 Zhou et al. 2023 arXiv:2209.15425; ref. 4 "19(13), 5473–5481 (1999)"; the §2.2 clause),
+confirm the in-text [4] and [9] still resolve, and ask in the return note whether a Correction will
+be published and linked under its own DOI. If the answer is a silent replacement, that is less than
+COPE asks for but more than the chapter had; take it and record it. Expected the week of
+2026-10-12.
+
+### 13. IGI accepted — 2026-10-01 and 2026-10-06
+
+The Editorial Management Team answered the appeal on the appeal thread, five days after it went:
+
+- 2026-10-01: "We have reviewed your concerns and will allow the revisions to be implemented.
+  Please understand that we can only quarantine the digital copy on our database will be updated.
+  The estimated time will be eight weeks because all files have been archived, and there is a
+  process for us to retrieve them."
+- Ben replied the same day with four questions (both chapters covered? same DOI and a visible
+  correction note? work from the marked PDFs? who to contact?) and re-attached the three files:
+  both marked copies and the Appendix B 2.0 PDF.
+- 2026-10-06: "The after-publication team has all the information necessary, and they have begun
+  the process of requesting both publications to be taken from our archives for editing purposes.
+  The DOI for each chapter will not change, and a correction notice will be on the website and in
+  the chapters. Our Proofing Coordinator overseas the after-publication processes and all
+  correspondence can continue through this email."
+
+So: both chapters, same DOIs, digital copies revised from the marked PDFs, a correction notice on
+the chapter pages and inside the chapters, eight weeks from 2026-10-01 (late November 2026),
+correspondence through the proofing desk address. Print copies keep the original text; the notice
+is what tells a print reader. Ben acknowledged on 2026-10-07. The COPE-complaint fallback in the
+appeal draft is not needed. Nothing is due from the author until IGI sends something to check;
+when the revised files or the notice text arrive, verify every one of the 32 and 8 items against
+them, and in particular that Appendix A carries the 2.1.0 Section A wording and Appendix B the 2.0
+scoring model, before approving.
 
 ### 12. Co-author agreement, and the two remaining letters — 2026-09-26
 
@@ -198,10 +257,12 @@ to the university account:
   proofing desk with the ch005 volume editor, both ch007 volume editors, and the co-authors in
   copy, both marked PDFs and the Appendix B 2.0 PDF attached.
 
-**Both sent 2026-09-27** from the university account, the Springer letter as a reply on the
-2025-11-11 galley thread and the IGI appeal as a new message on the ch005 thread. That closes
-every outbound item: three chapters, two publishers, four letters. Editor and co-author addresses
-are kept in the mail threads, not in this file.
+**Both sent 2026-09-26** from the university account (recorded here as 09-27 until the mail
+headers were checked on 2026-10-08: the IGI appeal left at 17:21 and the Springer request at 17:32,
+US Eastern), the Springer letter as a reply on the 2025-11-11 galley thread and the IGI appeal as
+a new message on the ch005 thread. That closed every outbound item: three chapters, two
+publishers, four letters. Editor and co-author addresses are kept in the mail threads, not in this
+file. Outcomes are steps 13 and 14.
 
 ### 11. IGI refused at the proofing desk — 2026-09-21 to 23
 
@@ -226,7 +287,7 @@ correction erratum". That is the next step, as a formal request to the editorial
 the proofing level, with the volume editors and co-authors copied. Ben told Atif Mohammad and
 Matthew Wyandt on 2026-09-25 that this is the plan; both acknowledged on 2026-09-25 and 26.
 
-### 10. Beyond Intelligence (ch007) — sent 2026-09-21; Springer — next
+### 10. Beyond Intelligence (ch007) — sent 2026-09-21; Springer — see step 14
 
 `Beyond-Intelligence-CORRECTIONS-MARKED.pdf` (eight reference comments, built 2026-09-17) **went
 2026-09-21** as a new message to `bookproofing@igi-global.com`, copying `cust@igi-global.com`,

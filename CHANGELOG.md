@@ -34,6 +34,13 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Changed
 
+- Corrigendum record, publisher outcomes through 2026-10-08. IGI's Editorial Management Team
+  accepted the appeal on 2026-10-01 and confirmed on 2026-10-06 that both chapters will be revised
+  under their existing DOIs with a correction notice on the website and in the chapters, about
+  eight weeks out. Springer's production vendor refused on 2026-09-28; the request went through the
+  SEET 2025 volume editor on 2026-10-01 and Springer is to send an updated PDF for proofread the
+  week of 2026-10-12. Runbook steps 13 and 14, the technical account's submission section, and the
+  two draft files carry the detail; the send date of both letters is corrected to 2026-09-26.
 - Colab notebook: §3 explains what the coherence parity check measures, and §9 says the rebuild
   must match the `--timesteps` and `--components` used in §8 (the CPU probe settings the §8
   comment suggests otherwise load with missing keys and generate a repeated token).

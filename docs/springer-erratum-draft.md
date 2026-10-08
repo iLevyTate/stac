@@ -1,4 +1,4 @@
-# Springer erratum request, drafted 2026-09-21, revised the same day (sent 2026-09-27)
+# Springer erratum request, drafted 2026-09-21, revised the same day (sent 2026-09-26)
 
 **Chapter:** Kennedy, B. J., Mohammad, A. F., & Wyandt, M. (2026). Synthetic Cognitive Augmentation
 Network. In *SEET 2025*, CCIS 2725, pp. 179–188. DOI 10.1007/978-3-032-08977-9_13.
@@ -89,3 +89,16 @@ Capitol Technology University
 ORCID 0000-0009-1337-0709
 bkennedy1@captechu.edu
 ```
+
+## Outcome
+
+- 2026-09-28: Straive's production supervisor replied that "your correction request could not be
+  processed because your paper has already been published" and "no belated corrections are
+  permitted after publication." The production vendor cannot issue a Correction notice; this was
+  the proof desk answering a proof question.
+- 2026-10-01: the three items went, in the same wording, to the SEET 2025 volume editor and the
+  conference address, asking for them to reach the CCIS publishing editor. Forwarded to Springer's
+  Production Manager on 2026-10-02.
+- 2026-10-06: the volume editor wrote that "Springer will send you updated PDF for proofread next
+  week." Not yet known whether a Correction will be published alongside the revised file; ask in
+  the return note. Runbook step 14.
