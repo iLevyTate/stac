@@ -1,0 +1,55 @@
+name: Dependabot auto-merge
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions: {}
+
+jobs:
+  request-auto-merge:
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Metadata only. Never check out or run code from the pull request.
+      - uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3
+        id: dependency
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Request GitHub auto-merge behind required CI
+        if: >-
+          steps.dependency.outputs.update-type == 'version-update:semver-patch' ||
+          steps.dependency.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          REQUIRED_JOBS: '["test (3.11)","documentation","test (3.10)"]'
+        run: |
+          set -euo pipefail
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq '.allow_auto_merge')" != true ]]; then
+            echo "GitHub auto-merge is disabled in this repository."
+            exit 0
+          fi
+          # The effective branch-rules endpoint evaluates active rulesets for this branch.
+          # Restrict matches to checks supplied by GitHub Actions (App ID 15368).
+          branch=$(jq -rn --arg ref "$BASE_BRANCH" '$ref | @uri')
+          rules=$(gh api "repos/$GITHUB_REPOSITORY/rules/branches/$branch" --paginate --slurp)
+          if ! jq -e --argjson wanted "$REQUIRED_JOBS" '
+            [ .[][] | select(.type == "required_status_checks")
+              | .parameters.required_status_checks[]
+              | select(.integration_id == 15368) | .context ] as $active
+            | ($wanted | length) > 0 and (($wanted - $active) | length == 0)
+          ' <<< "$rules" > /dev/null; then
+            echo "Required Actions checks are not enforced for this branch. Leaving the PR for review."
+            exit 0
+          fi
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash --match-head-commit "$EXPECTED_HEAD"
