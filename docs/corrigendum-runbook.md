@@ -3,7 +3,7 @@
 Companion to [`corrigendum-combined.md`](corrigendum-combined.md) (the letter) and
 [`corrigendum-2026-07.md`](corrigendum-2026-07.md) (the technical account). This file is the
 operational checklist: what is done, what remains, who does it, and the exact click or command.
-Updated 2026-09-14 (second revision, after the proofing desk's reply).
+Publisher correspondence recorded through 2026-10-31.
 
 ## Done
 
@@ -22,7 +22,7 @@ Updated 2026-09-14 (second revision, after the proofing desk's reply).
 | Appendix B PDF | rendered from SCAN-Resources `Forms/Appendix-B-Scoring-v2.0.md` (`main`, ae7c7d0) with headless Chromium on 2026-09-09, 8 pages, metadata guard 0 hits, delivered as a file (not committed: the repository's PDFs are the published 1.0.0 record). It is not attached to the draft; attach it at send. |
 | Send copy | The Gmail draft could not be used: Gmail rewrites every URL in a stored draft into a `google.com/url?q=` redirect, and did so again after a clean re-save. The draft was retitled "DO NOT SEND FROM GMAIL" and the letter was sent instead from a plain-text copy pasted into a new message from the university account. That copy is recorded as `corrigendum-sent-2026-09-13.md`. |
 | IGI outcome | Accepted 2026-10-01; confirmed 2026-10-06: both chapters, DOIs unchanged, correction notice on the website and in the chapters, about eight weeks. Step 13. |
-| Springer outcome | Vendor refused 2026-09-28; rerouted through the SEET 2025 volume editor 2026-10-01; Springer to send an updated PDF for proofread the week of 2026-10-12. Step 14. |
+| Springer outcome | Vendor refused 2026-09-28; rerouted through the SEET 2025 volume editor 2026-10-01; proof reviewed and conditionally approved 2026-10-31. Final PDF and linked erratum still need verification. Step 14. |
 | Branch housekeeping | Not done: origin still carries six branches besides `main` and the current working branch. `claude/stac-doi-metadata-wbiwdd` held one stranded commit (17ab08d, the full Tate (2025a) form in the two superseded drafts), cherry-picked on 2026-09-09; `claude/stac-doi-metadata-yw5zvv` is an older superset that `main` has overtaken; `docs/readme-rewrite` is PR #25, closed unmerged on 2026-09-09; the other three are fully merged. All six can be deleted. |
 
 ## Remaining, in dependency order
@@ -209,14 +209,28 @@ editor forwarded it to Springer's Production Manager on 2026-10-02 and wrote on 
 "Springer will send you updated PDF for proofread next week." Ben answered the same day that he
 will return it within 48 hours of receipt.
 
-What this is and is not. An "updated PDF for proofread" means Springer is preparing a revised
-chapter file. It does not yet say whether the version of record will be replaced in place or a
-Correction notice published alongside it. When the PDF arrives: check all three items against it
-(ref. 9 Zhou et al. 2023 arXiv:2209.15425; ref. 4 "19(13), 5473–5481 (1999)"; the §2.2 clause),
-confirm the in-text [4] and [9] still resolve, and ask in the return note whether a Correction will
-be published and linked under its own DOI. If the answer is a silent replacement, that is less than
-COPE asks for but more than the chapter had; take it and record it. Expected the week of
-2026-10-12.
+**2026-10-19.** Abdul Basit reported that the volume had been published the previous week.
+On SpringerLink, references 4 and 9 were unchanged and no Correction notice was visible.
+The paywall prevented Ben from checking Section 2.2. Ben reported the missing corrections
+and asked what would happen next. Abdul Basit said he would contact Springer again.
+
+**2026-10-27.** In the revised text, reference 4 contained the corrected publication details
+and Section 2.2 contained the corrected SCANAQ wording. Reference 9 on printed page 187
+still ended in “(2021).” Ben requested its removal. Spikformer appeared at ICLR 2023,
+and its arXiv preprint (2209.15425) dates to 2022. Ben also requested confirmation that a
+public Correction notice linked to the chapter would cover all three changes. At this point
+he was waiting for a revised PDF and had withheld final approval.
+
+**2026-10-31.** The new proof removed “(2021)” from reference 9. Reference 4 had the
+correct journal details but omitted its fourth author, Lee, G.P. Section 2.2 correctly
+said that SCANAQ “draws on validated source scales.” Ben gave conditional approval and
+asked Springer to add Lee and revise the opening note to identify both references and
+Section 2.2. The erratum DOI did not resolve when checked that day.
+
+**Next verification.** Check the final PDF for Lee and the revised opening note. Confirm
+that the published erratum covers all three corrections and that its
+[DOI](https://doi.org/10.1007/978-3-032-08977-9_49) resolves.
+
 
 ### 13. IGI accepted — 2026-10-01 and 2026-10-06
 
