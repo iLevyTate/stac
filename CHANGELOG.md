@@ -34,6 +34,13 @@ corrigendum offers the chapter's editor as a verification path.
 
 ### Changed
 
+- Springer corrigendum (runbook step 14). On October 19 the published chapter still showed the
+  old references and no Correction notice. On October 27 the revision corrected reference 4’s
+  publication details and the SCANAQ wording in Section 2.2. Reference 9 still ended in “(2021).”
+  The October 31 proof removed that year. Ben requested the missing fourth author for reference 4
+  and an opening note covering all three changes. Approval was conditional. The final PDF and
+  publicly linked erratum still need verification.
+
 - Corrigendum record, publisher outcomes through 2026-10-08. IGI's Editorial Management Team
   accepted the appeal on 2026-10-01 and confirmed on 2026-10-06 that both chapters will be revised
   under their existing DOIs with a correction notice on the website and in the chapters, about
