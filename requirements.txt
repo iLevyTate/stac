@@ -31,7 +31,7 @@ tqdm>=4.65.0
 
 # spikingjelly's ann2snn module imports requests without declaring it, and transformers 5
 # no longer pulls it in. 2.33 fixes the temp-file reuse advisory GHSA-gc5v-m9x4-r6x2.
-requests>=2.33.0
+requests>=2.34.2
 
 # Testing
 pytest>=7.0.0
