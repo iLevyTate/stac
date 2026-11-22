@@ -34,7 +34,7 @@ tqdm>=4.65.0
 requests>=2.34.2
 
 # Testing
-pytest>=7.0.0
+pytest>=9.2.0
 
 # Optional, used only by specific opt-in paths (each guards its own import and prints an
 # install hint if missing):
