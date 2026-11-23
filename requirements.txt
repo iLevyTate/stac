@@ -10,7 +10,7 @@ torch>=2.2.0,<3.0.0
 # and 4.53 for GPT-2, Cache objects and (output, weights) returns after), so the code
 # still runs on older releases, but they carry those advisories. transformers 5
 # requires Python 3.10+.
-transformers>=5.10.0,<6.0.0
+transformers>=5.23.0,<6.0.0
 numpy>=1.24.0,<2.0.0
 packaging>=21.0
 
@@ -31,10 +31,10 @@ tqdm>=4.65.0
 
 # spikingjelly's ann2snn module imports requests without declaring it, and transformers 5
 # no longer pulls it in. 2.33 fixes the temp-file reuse advisory GHSA-gc5v-m9x4-r6x2.
-requests>=2.33.0
+requests>=2.34.2
 
 # Testing
-pytest>=7.0.0
+pytest>=9.2.0
 
 # Optional, used only by specific opt-in paths (each guards its own import and prints an
 # install hint if missing):
