@@ -88,10 +88,7 @@ def test_v1_smoke_run_matches_baseline():
     if not model_name:
         pytest.skip("STAC_TEST_MODEL is not set (conftest sets it when the hub is unreachable)")
 
-    try:
-        metrics = _run_smoke(model_name)
-    except Exception as e:
-        pytest.skip(f"Could not run the V1 smoke pipeline: {e}")
+    metrics = _run_smoke(model_name)
 
     expected = baseline["metrics"]
 
@@ -119,10 +116,7 @@ def test_spiking_pathway_is_alive():
     if not model_name:
         pytest.skip("STAC_TEST_MODEL is not set")
 
-    try:
-        metrics = _run_smoke(model_name)
-    except Exception as e:
-        pytest.skip(f"Could not run the V1 smoke pipeline: {e}")
+    metrics = _run_smoke(model_name)
 
     assert metrics["spike_mean"] > 0.0, "AdEx neurons emitted no spikes — the pathway is dead again"
     assert metrics["spike_mean"] < 1.0, "every neuron fires at every step — no sparsity"

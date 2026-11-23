@@ -2,16 +2,13 @@
 # torch 2.2–2.x are supported. Pick a build matching your Python/CUDA runtime
 # (see docs/hardware_requirements.md for CPU/CUDA install commands).
 torch>=2.2.0,<3.0.0
-# transformers 5.10 is the first release clearing every published advisory on the
-# 4.x line (deserialization RCEs fixed in 4.48, ReDoS fixes in 4.52/4.53, the RCE and
-# LightGlue code-execution fixes in 5.3/5.5, and the save_pretrained path traversal
-# fixed in 5.10). SpikeAttention and TemporalSpikeProcessor detect the attention
-# protocol of the installed transformers (legacy (k, v) tuples below 4.48 for Llama
-# and 4.53 for GPT-2, Cache objects and (output, weights) returns after), so the code
-# still runs on older releases, but they carry those advisories. transformers 5
-# requires Python 3.10+.
-transformers>=5.23.0,<6.0.0
-numpy>=1.24.0,<2.0.0
+# Transformers 5.21 and later require Python 3.11+. Use the latest Python 3.10
+# release as that lane's floor; it includes the advisory fixes through 5.10.
+transformers>=5.20.2,<6.0.0; python_version < "3.11"
+transformers>=5.23.0,<6.0.0; python_version >= "3.11"
+# NumPy 1.x has wheels through Python 3.12. Keep that range for existing installs.
+numpy>=1.24.0,<2.0.0; python_version < "3.13"
+numpy>=2.1.0,<3.0.0; python_version >= "3.13"
 packaging>=21.0
 
 # Spiking Neural Networks
@@ -52,5 +49,3 @@ pytest>=9.2.0
 # black>=23.0.0
 # flake8>=6.0.0
 # mypy>=1.0.0
-
-# Recommended Python: 3.10–3.11 (transformers 5 needs 3.10+; CI is tested on 3.10, 3.11).
