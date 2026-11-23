@@ -11,7 +11,9 @@ torch>=2.2.0,<3.0.0
 # still runs on older releases, but they carry those advisories. transformers 5
 # requires Python 3.10+.
 transformers>=5.23.0,<6.0.0
-numpy>=1.24.0,<2.0.0
+# NumPy 1.x has wheels through Python 3.12. Keep that range for existing installs.
+numpy>=1.24.0,<2.0.0; python_version < "3.13"
+numpy>=2.1.0,<3.0.0; python_version >= "3.13"
 packaging>=21.0
 
 # Spiking Neural Networks

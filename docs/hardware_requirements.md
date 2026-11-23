@@ -32,6 +32,7 @@
 - ✅ **Software Simulation**: Full support on CPU/GPU
 - ✅ **NVIDIA GPUs**: CUDA 11.8+ or 12.1+
 - ✅ **PyTorch**: >= 2.2, < 3.0 (matches requirements.txt)
+- **Python and NumPy**: Linux CPU CI tests Python 3.10 through 3.15. The requirements use NumPy 1.x through Python 3.12 and NumPy 2.x on Python 3.13 and later. Use the recorded environment when reproducing a published run.
 
 ### Planned Support (Future Work)
 - ⏳ **Intel Loihi-2**: Neuromorphic hardware deployment (future work; no published hardware runs from this repo)
@@ -79,4 +80,4 @@ pip install spikingjelly[cuda] -U --pre
 ### Performance Optimization
 1. Use SSD storage for faster I/O
 2. Close unnecessary applications during conversion
-3. Use simplified mode for initial testing 
+3. Use simplified mode for initial testing

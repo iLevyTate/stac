@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -32,12 +32,14 @@ jobs:
           ${{ runner.os }}-pip-
     
     - name: Install dependencies
+      env:
+        PIP_ONLY_BINARY: torch,torchvision,torchaudio,numpy,scipy
       run: |
         python -m pip install --upgrade pip
         # SpikingJelly imports torchvision and torchaudio. Resolve all three PyTorch
         # wheels together so the CPU runner gets matching native libraries.
-        pip install "torch>=2.2,<3" torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-        pip install "transformers>=5.10,<6" "numpy<2.0" packaging pytest spikingjelly requests tqdm
+        pip install -c requirements.txt torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        pip install -c requirements.txt transformers numpy packaging pytest spikingjelly requests tqdm
       continue-on-error: false
 
     - name: Install optional dependencies
@@ -95,7 +97,7 @@ jobs:
       env:
         STAC_TEST_MODEL: local/test-models/tiny-gpt2
       run: |
-        python -m pytest tests/ -q
+        python -m pytest tests/ -q -rs
     
   documentation:
     runs-on: ubuntu-latest
