@@ -21,7 +21,7 @@ accelerate>=1.0.0,<2.0.0
 
 # Parameter-efficient finetuning (LoRA adapters for distillation)
 # peft below 0.17 imports HybridCache, which transformers 5 removed.
-peft>=0.21.0,<1.0.0
+peft>=0.22.0,<1.0.0
 
 # Progress Monitoring
 tqdm>=4.65.0
