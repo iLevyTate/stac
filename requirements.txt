@@ -1,7 +1,7 @@
 # Core PyTorch and ML Framework
 # torch 2.2–2.x are supported. Pick a build matching your Python/CUDA runtime
 # (see docs/hardware_requirements.md for CPU/CUDA install commands).
-torch>=2.2.0,<3.0.0
+torch>=2.15.0,<3.0.0
 # Transformers 5.21 and later require Python 3.11+. Use the latest Python 3.10
 # release as that lane's floor; it includes the advisory fixes through 5.10.
 transformers>=5.20.2,<6.0.0; python_version < "3.11"
