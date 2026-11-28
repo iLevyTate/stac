@@ -17,7 +17,7 @@ spikingjelly>=0.0.0.0.14
 
 # Efficient Training and Quantization (optional; used by the quantized conversion paths)
 bitsandbytes>=0.45.0,<1.0.0
-accelerate>=1.0.0,<2.0.0
+accelerate>=1.16.0,<2.0.0
 
 # Parameter-efficient finetuning (LoRA adapters for distillation)
 # peft below 0.17 imports HybridCache, which transformers 5 removed.
